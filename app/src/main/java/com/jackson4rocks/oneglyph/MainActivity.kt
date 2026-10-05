@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.delay
 
 private val Red = Color(0xFFFF3B30)
@@ -144,6 +146,10 @@ private fun OneGlyphApp() {
 
     var page by remember {
         mutableStateOf("HOME")
+    }
+
+    var showSplash by remember {
+        mutableStateOf(true)
     }
 
     var isDark by remember {
@@ -287,6 +293,12 @@ private fun OneGlyphApp() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        delay(950L)
+        showSplash = false
+        ChargingMonitor.sync(context)
+    }
+
     LaunchedEffect(appEnabled) {
         if (!appEnabled) {
             beatSyncOn = false
@@ -333,6 +345,11 @@ private fun OneGlyphApp() {
 
             delay(1000L)
         }
+    }
+
+    if (showSplash) {
+        OneGlyphSplash()
+        return
     }
 
     MaterialTheme(
@@ -556,10 +573,12 @@ private fun OneGlyphApp() {
                             onChargingEnabled = {
                                 chargingEnabled = it
                                 store.setChargingEnabled(it)
+                                ChargingMonitor.sync(context)
                             },
                             onChargeTarget = {
                                 chargeTarget = it
                                 store.setChargeTarget(it)
+                                ChargingMonitor.sync(context)
                             },
                             onCameraSeconds = {
                                 cameraSeconds = it
@@ -1597,14 +1616,41 @@ private fun SettingsPage(
                 )
         )
 
-        Text(
-            "Leon",
-            fontFamily =
-                NDotFamily,
-            fontSize = 20.sp,
-            color =
-                colors.onSurface
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            androidx.compose.foundation.Image(
+                painter = painterResource(R.drawable.leon_profile),
+                contentDescription = "Leon Sony",
+                modifier = Modifier
+                    .size(56.dp)
+                    .border(
+                        1.dp,
+                        colors.outline,
+                        CircleShape
+                    )
+                    .padding(2.dp)
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    "Leon Sony",
+                    fontFamily = NDotFamily,
+                    fontSize = 20.sp,
+                    color = colors.onSurface
+                )
+
+                Text(
+                    "Jackson4Rocks",
+                    fontFamily = NDotFamily,
+                    fontSize = 9.sp,
+                    color = colors.onSurface.copy(alpha = .55f)
+                )
+            }
+        }
 
         SmallNote(
             "OneGlyph is an independent community project."
@@ -1623,6 +1669,90 @@ private fun SettingsPage(
                 )
             }
         )
+    }
+}
+
+@Composable
+private fun OneGlyphSplash() {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+    ) {
+        Canvas(
+            modifier =
+                Modifier.fillMaxSize()
+        ) {
+            for (i in 0 until 72) {
+                val x =
+                    ((i * 47) % 1000) / 1000f
+                val y =
+                    ((i * 83 + 113) % 1000) / 1000f
+                val radius =
+                    1.2f +
+                        ((i * 7) % 4) * 0.45f
+                val alpha =
+                    0.18f +
+                        ((i * 13) % 5) * 0.08f
+
+                drawCircle(
+                    color =
+                        Color.White.copy(
+                            alpha = alpha
+                        ),
+                    radius = radius,
+                    center =
+                        androidx.compose.ui.geometry.Offset(
+                            size.width * x,
+                            size.height * y
+                        )
+                )
+            }
+        }
+
+        Column(
+            modifier =
+                Modifier
+                    .align(Alignment.Center)
+                    .padding(
+                        horizontal = 30.dp
+                    ),
+            horizontalAlignment =
+                Alignment.CenterHorizontally,
+            verticalArrangement =
+                Arrangement.spacedBy(
+                    10.dp
+                )
+        ) {
+            androidx.compose.foundation.Image(
+                painter =
+                    painterResource(
+                        R.drawable.ic_oneglyph
+                    ),
+                contentDescription =
+                    "OneGlyph",
+                modifier =
+                    Modifier.size(104.dp)
+            )
+
+            Text(
+                "OneGlyph",
+                fontFamily = NDotFamily,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+
+            Text(
+                "Make the one dot useful.",
+                fontFamily = NDotFamily,
+                fontSize = 11.sp,
+                color = Color.White.copy(
+                    alpha = .62f
+                )
+            )
+        }
     }
 }
 
