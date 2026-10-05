@@ -117,7 +117,7 @@ OneGlyph is currently built for the **Nothing Phone (3a) Lite / Galaxian** and d
 
 It is **not** a universal Glyph framework replacement and is not intended to be a generic lighting app for every Android phone.
 
-## A note for developers
+## Quick Note:
 
 OneGlyph talks to the stock Nothing Glyph service rather than relying on the normal Android `LightsManager` API, which does not expose the Glyph dot normally on this device.
 
@@ -132,23 +132,13 @@ app/src/main/java/com/jackson4rocks/oneglyph/
 └── MainActivity.kt      # Compose UI
 ```
 
-## Building
-
-The project uses:
-
-- Android Gradle Plugin 9.1.1
-- Kotlin + Jetpack Compose
-- Android SDK 36
-- JDK 17
-
-A GitHub Actions workflow builds a debug APK on every push to `main`.
 
 ## Project status
 
 OneGlyph is an **active experiment** built specifically around the Glyph dot on Galaxian.
 
 The app is intentionally focused on small, useful effects rather than trying to recreate Nothing's entire Glyph experience.
-
+It can be archived or abandoned at any time.
 ## License
 
 See the repository for the current license and project files.
@@ -159,7 +149,7 @@ See the repository for the current license and project files.
 
 **One dot. A lot more possibilities.**
 
-Made by **Leon**  
+Made by **Leon Sony**  
 [GitHub](https://github.com/Jackson4Rocks)
 
 </div>
