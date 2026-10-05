@@ -244,7 +244,6 @@ class MediaPlaybackWatcher(
                     appContext,
                     GlyphNotificationListenerService::class.java
                 ),
-                0,
                 handler
             )
             refresh()
