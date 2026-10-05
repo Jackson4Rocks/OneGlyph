@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OneGlyph</string>
-    <string name="notification_listener_name">OneGlyph Notification Reminders</string>
+    <string name="notification_listener_name">OneGlyph Media Access</string>
+    <string name="media_access_name">OneGlyph Media Access</string>
 </resources>
