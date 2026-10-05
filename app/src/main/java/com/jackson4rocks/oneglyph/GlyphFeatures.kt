@@ -176,38 +176,223 @@ class PatternStore(context: Context) {
     }
 }
 
-class MusicBeatVisualizer(
-    private val context: Context,
-    private val onFrame: (brightness: Int, beat: Boolean) -> Unit
-) {
-    private var visualizer: Visualizer? = null
-    private val energyHistory = ArrayDeque<Double>()
-    private var lastEnergy = 0.0
-    private var lastBeatMs = 0L
-    private var flashUntilMs = 0L
+data class MediaPlaybackInfo(
+    val packageName: String,
+    val title: String,
+    val artist: String,
+    val isPlaying: Boolean,
+    val positionMs: Long,
+    val durationMs: Long
+)
 
-    fun start(): Boolean {
-        val permission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
+class MediaPlaybackWatcher(
+    context: Context,
+    private val onChanged: (MediaPlaybackInfo?) -> Unit,
+    private val onAccessError: () -> Unit
+) : AutoCloseable {
+    private val appContext = context.applicationContext
+    private val manager =
+        appContext.getSystemService(
+            android.media.session.MediaSessionManager::class.java
+        )
+    private val handler =
+        android.os.Handler(
+            android.os.Looper.getMainLooper()
+        )
+    private val listener =
+        android.media.session.MediaSessionManager
+            .OnActiveSessionsChangedListener { controllers ->
+                selectController(controllers)
+            }
+
+    private var currentController:
+        android.media.session.MediaController? = null
+
+    private val callback =
+        object : android.media.session.MediaController.Callback() {
+            override fun onPlaybackStateChanged(
+                state: android.media.session.PlaybackState?
+            ) {
+                publish()
+            }
+
+            override fun onMetadataChanged(
+                metadata: android.media.MediaMetadata?
+            ) {
+                publish()
+            }
+
+            override fun onSessionDestroyed() {
+                currentController = null
+                onChanged(null)
+                refresh()
+            }
+        }
+
+    fun start() {
+        try {
+            manager.addOnActiveSessionsChangedListener(
+                listener,
+                android.content.ComponentName(
+                    appContext,
+                    GlyphNotificationListenerService::class.java
+                ),
+                0,
+                handler
+            )
+            refresh()
+        } catch (_: SecurityException) {
+            onAccessError()
+        } catch (_: Throwable) {
+            onAccessError()
+        }
+    }
+
+    fun refresh() {
+        try {
+            selectController(
+                manager.getActiveSessions(
+                    android.content.ComponentName(
+                        appContext,
+                        GlyphNotificationListenerService::class.java
+                    )
+                )
+            )
+        } catch (_: SecurityException) {
+            onAccessError()
+        } catch (_: Throwable) {
+            onChanged(null)
+        }
+    }
+
+    private fun selectController(
+        controllers:
+            List<android.media.session.MediaController>?
+    ) {
+        val list = controllers.orEmpty()
+
+        val preferred =
+            list.firstOrNull {
+                it.playbackState?.state ==
+                    android.media.session.PlaybackState.STATE_PLAYING
+            } ?: list.firstOrNull {
+                it.metadata != null
+            }
+
+        if (preferred === currentController) {
+            publish()
+            return
+        }
+
+        currentController?.unregisterCallback(callback)
+        currentController = preferred
+        currentController?.registerCallback(
+            callback,
+            handler
         )
 
-        if (permission != PackageManager.PERMISSION_GRANTED) {
+        publish()
+    }
+
+    private fun publish() {
+        val controller = currentController ?: run {
+            onChanged(null)
+            return
+        }
+
+        val state = controller.playbackState
+        val metadata = controller.metadata
+
+        val duration =
+            metadata?.getLong(
+                android.media.MediaMetadata.METADATA_KEY_DURATION
+            ) ?: 0L
+
+        onChanged(
+            MediaPlaybackInfo(
+                packageName = controller.packageName ?: "",
+                title =
+                    metadata?.getString(
+                        android.media.MediaMetadata
+                            .METADATA_KEY_TITLE
+                    ).orEmpty(),
+                artist =
+                    metadata?.getString(
+                        android.media.MediaMetadata
+                            .METADATA_KEY_ARTIST
+                    ).orEmpty(),
+                isPlaying =
+                    state?.state ==
+                        android.media.session.PlaybackState.STATE_PLAYING,
+                positionMs =
+                    state?.position?.coerceAtLeast(0L)
+                        ?: 0L,
+                durationMs = duration.coerceAtLeast(0L)
+            )
+        )
+    }
+
+    override fun close() {
+        currentController?.unregisterCallback(callback)
+        currentController = null
+
+        try {
+            manager.removeOnActiveSessionsChangedListener(
+                listener
+            )
+        } catch (_: Throwable) {
+        }
+
+        onChanged(null)
+    }
+}
+
+class MusicBeatVisualizer(
+    private val context: Context,
+    private val onBeat: (brightness: Int) -> Unit
+) {
+    private var visualizer: Visualizer? = null
+    private var previousMagnitudes =
+        DoubleArray(32)
+
+    private val onsetHistory =
+        ArrayDeque<Double>()
+
+    private var lastBeatMs = 0L
+
+    fun start(): Boolean {
+        val permission =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            )
+
+        if (permission !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
             return false
         }
 
         return try {
             stop()
-            energyHistory.clear()
-            lastEnergy = 0.0
+
+            previousMagnitudes =
+                DoubleArray(32)
+
+            onsetHistory.clear()
             lastBeatMs = 0L
-            flashUntilMs = 0L
 
             val v = Visualizer(0)
-            v.captureSize = Visualizer.getCaptureSizeRange().last()
+
+            v.captureSize =
+                Visualizer
+                    .getCaptureSizeRange()
+                    .last()
 
             v.setDataCaptureListener(
-                object : Visualizer.OnDataCaptureListener {
+                object :
+                    Visualizer.OnDataCaptureListener {
+
                     override fun onWaveFormDataCapture(
                         capture: Visualizer,
                         waveform: ByteArray,
@@ -219,91 +404,150 @@ class MusicBeatVisualizer(
                         fft: ByteArray,
                         samplingRate: Int
                     ) {
-                        if (fft.size < 8) return
-
-                        val now = SystemClock.uptimeMillis()
-                        val maxBin = minOf(
-                            fft.size / 2 - 1,
-                            24
-                        )
-
-                        var energy = 0.0
-                        var weightTotal = 0.0
-
-                        for (bin in 2..maxBin) {
-                            val real = fft[bin * 2].toInt()
-                            val imag = fft[bin * 2 + 1].toInt()
-                            val magnitude = sqrt(
-                                (real * real + imag * imag).toDouble()
+                        val maxBin =
+                            minOf(
+                                30,
+                                (fft.size / 2) - 1
                             )
 
-                            // Heavier weighting on the low end where kick/snare
-                            // transients are most useful for a single-dot Glyph.
-                            val weight =
-                                1.0 + (1.0 / bin.coerceAtLeast(1))
+                        if (maxBin < 4) return
 
-                            energy += magnitude * weight
-                            weightTotal += weight
-                        }
+                        var flux = 0.0
+                        var lowEnergy = 0.0
+                        var energy = 0.0
 
-                        if (weightTotal <= 0.0) return
-
-                        energy /= weightTotal
-
-                        energyHistory.addLast(energy)
-                        while (energyHistory.size > 28) {
-                            energyHistory.removeFirst()
-                        }
-
-                        if (energyHistory.size < 8) {
-                            lastEnergy = energy
-                            val warmup =
-                                ((energy / 18.0) * 900.0)
+                        for (bin in 2..maxBin) {
+                            val real =
+                                fft[bin * 2]
                                     .toInt()
-                                    .coerceIn(320, 2600)
-                            onFrame(warmup, false)
+
+                            val imag =
+                                fft[bin * 2 + 1]
+                                    .toInt()
+
+                            val magnitude =
+                                sqrt(
+                                    (
+                                        real * real +
+                                            imag * imag
+                                    ).toDouble()
+                                )
+
+                            val previous =
+                                previousMagnitudes[
+                                    bin
+                                ]
+
+                            val delta =
+                                (
+                                    magnitude -
+                                        previous
+                                ).coerceAtLeast(0.0)
+
+                            // Bass and low-mid bins get more influence,
+                            // which makes kick/snare transients much more
+                            // useful for a single light.
+                            val weight =
+                                when {
+                                    bin <= 6 -> 1.8
+                                    bin <= 14 -> 1.35
+                                    else -> 0.8
+                                }
+
+                            flux += delta * weight
+                            energy +=
+                                magnitude * weight
+
+                            if (bin <= 10) {
+                                lowEnergy +=
+                                    magnitude
+                            }
+
+                            previousMagnitudes[
+                                bin
+                            ] = magnitude
+                        }
+
+                        onsetHistory.addLast(flux)
+
+                        while (
+                            onsetHistory.size > 24
+                        ) {
+                            onsetHistory.removeFirst()
+                        }
+
+                        if (
+                            onsetHistory.size < 8
+                        ) {
                             return
                         }
 
                         val baseline =
-                            energyHistory
+                            onsetHistory
                                 .dropLast(1)
                                 .average()
                                 .coerceAtLeast(1.0)
 
-                        val ratio = energy / baseline
-                        val rising = energy > lastEnergy * 1.08
-                        val cooldownReady =
-                            now - lastBeatMs >= 220L
+                        val ratio =
+                            flux /
+                                baseline
+
+                        val now =
+                            SystemClock
+                                .uptimeMillis()
+
+                        val risingEnough =
+                            flux >
+                                onsetHistory
+                                    .dropLast(1)
+                                    .takeLast(3)
+                                    .average()
+                                    .coerceAtLeast(1.0)
+
+                        val cooldown =
+                            now - lastBeatMs >=
+                                170L
 
                         val beat =
-                            ratio >= 1.48 &&
-                                rising &&
-                                cooldownReady
+                            ratio >= 1.55 &&
+                                risingEnough &&
+                                cooldown
 
-                        if (beat) {
-                            lastBeatMs = now
-                            flashUntilMs = now + 135L
-                        }
+                        if (!beat) return
 
-                        lastEnergy = energy
+                        lastBeatMs = now
 
-                        val normalized =
-                            (ratio * 1500.0)
+                        val kickBoost =
+                            (
+                                lowEnergy /
+                                    (
+                                        energy /
+                                            4.0
+                                    ).coerceAtLeast(
+                                        1.0
+                                    )
+                            ).coerceIn(
+                                0.6,
+                                1.6
+                            )
+
+                        val strength =
+                            (
+                                ratio *
+                                    2200.0 *
+                                    kickBoost
+                            )
                                 .toInt()
-                                .coerceIn(380, 3200)
+                                .coerceIn(
+                                    1800,
+                                    4095
+                                )
 
-                        val brightness =
-                            if (now < flashUntilMs) {
-                                4095
-                            } else {
-                                normalized
-                            }
-
-                        onFrame(brightness, beat)
+                        onBeat(strength)
                     }
                 },
-                Visualizer.getMaxCaptureRate() / 2,
+                Visualizer
+                    .getMaxCaptureRate() / 2,
                 false,
                 true
             )
@@ -331,7 +575,127 @@ class MusicBeatVisualizer(
         }
 
         visualizer = null
-        energyHistory.clear()
+        onsetHistory.clear()
+    }
+}
+
+class BeatSyncController(
+    context: Context,
+    private val glyph: GlyphController,
+    private val onState: (MediaPlaybackInfo?) -> Unit,
+    private val onError: (String) -> Unit
+) : AutoCloseable {
+    private val appContext =
+        context.applicationContext
+
+    private var watcher:
+        MediaPlaybackWatcher? = null
+
+    private var visualizer:
+        MusicBeatVisualizer? = null
+
+    private var lastTrackKey = ""
+
+    fun start() {
+        if (watcher != null) return
+
+        watcher = MediaPlaybackWatcher(
+            appContext,
+            onChanged = { info ->
+                onState(info)
+                handlePlayback(info)
+            },
+            onAccessError = {
+                stopAudio()
+                onError(
+                    "Turn on Media Access to let OneGlyph see what's playing."
+                )
+            }
+        )
+
+        watcher?.start()
+    }
+
+    private fun handlePlayback(
+        info: MediaPlaybackInfo?
+    ) {
+        if (info == null) {
+            stopAudio()
+            return
+        }
+
+        val trackKey =
+            info.packageName +
+                "|" +
+                info.title +
+                "|" +
+                info.artist
+
+        if (
+            info.isPlaying &&
+            trackKey != lastTrackKey
+        ) {
+            lastTrackKey = trackKey
+            restartAudio()
+            return
+        }
+
+        if (info.isPlaying) {
+            if (visualizer == null) {
+                restartAudio()
+            }
+        } else {
+            stopAudio()
+        }
+    }
+
+    private fun restartAudio() {
+        visualizer?.stop()
+
+        val next =
+            MusicBeatVisualizer(
+                appContext
+            ) { brightness ->
+                if (glyph.isReady()) {
+                    glyph.playPattern(
+                        listOf(
+                            GlyphStep(
+                                brightness,
+                                75
+                            ),
+                            GlyphStep(
+                                0,
+                                95
+                            )
+                        )
+                    )
+                }
+            }
+
+        if (next.start()) {
+            visualizer = next
+        } else {
+            visualizer = null
+            onError(
+                "Audio access is needed for Beat Sync."
+            )
+        }
+    }
+
+    private fun stopAudio() {
+        visualizer?.stop()
+        visualizer = null
+        glyph.stopPattern()
+    }
+
+    fun refresh() {
+        watcher?.refresh()
+    }
+
+    override fun close() {
+        stopAudio()
+        watcher?.close()
+        watcher = null
     }
 }
 
