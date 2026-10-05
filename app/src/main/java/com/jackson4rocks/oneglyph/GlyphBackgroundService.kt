@@ -193,40 +193,6 @@ class GlyphBackgroundService : Service() {
     override fun onTaskRemoved(
         rootIntent: Intent?
     ) {
-        if (toyRunning) {
-            try {
-                val restart =
-                    Intent(
-                        applicationContext,
-                        GlyphBackgroundService::class.java
-                    ).setAction(
-                        ACTION_TOY_ON
-                    )
-
-                if (
-                    Build.VERSION.SDK_INT >= 26
-                ) {
-                    startForegroundService(
-                        restart
-                    )
-                } else {
-                    startService(restart)
-                }
-            } catch (e: Throwable) {
-                android.util.Log.w(
-                    "OneGlyph",
-                    "Could not request background service restart",
-                    e
-                )
-            }
-        }
-
-        super.onTaskRemoved(rootIntent)
-    }
-
-    override fun onTaskRemoved(
-        rootIntent: Intent?
-    ) {
         if (PatternStore(this).appEnabled()) {
             try {
                 val restart =
@@ -254,7 +220,7 @@ class GlyphBackgroundService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private fun startToyLoop {
+    private fun startToyLoop() {
         if (!toyRunning) {
             toyRunning = true
         }
