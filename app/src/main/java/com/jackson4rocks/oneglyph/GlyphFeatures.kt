@@ -4,15 +4,23 @@ import android.Manifest
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.MediaMetadata
 import android.media.RingtoneManager
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.media.audiofx.Visualizer
+import android.os.BatteryManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
-import android.service.notification.StatusBarNotification
-import androidx.core.content.ContextCompat
+import android.view.KeyEvent
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -24,156 +32,9 @@ data class GlyphStep(
     val durationMs: Long
 )
 
-object GlyphPatterns {
-    val single = listOf(
-        GlyphStep(4095, 200),
-        GlyphStep(0, 180)
-    )
-
-    val double = listOf(
-        GlyphStep(4095, 160),
-        GlyphStep(0, 120),
-        GlyphStep(4095, 160),
-        GlyphStep(0, 220)
-    )
-
-    val fast = listOf(
-        GlyphStep(4095, 90),
-        GlyphStep(0, 80),
-        GlyphStep(4095, 90),
-        GlyphStep(0, 80),
-        GlyphStep(4095, 90),
-        GlyphStep(0, 220)
-    )
-
-    val slow = listOf(
-        GlyphStep(2600, 650),
-        GlyphStep(0, 450)
-    )
-
-    val heartbeat = listOf(
-        GlyphStep(4095, 110),
-        GlyphStep(0, 90),
-        GlyphStep(4095, 180),
-        GlyphStep(0, 650)
-    )
-
-    val cameraCountdown = listOf(
-        GlyphStep(4095, 120),
-        GlyphStep(0, 180),
-        GlyphStep(4095, 120),
-        GlyphStep(0, 180),
-        GlyphStep(4095, 120),
-        GlyphStep(0, 900)
-    )
-
-    val chargingStart = listOf(
-        GlyphStep(1200, 220),
-        GlyphStep(2300, 260),
-        GlyphStep(3600, 360),
-        GlyphStep(4095, 520),
-        GlyphStep(0, 300)
-    )
-
-    fun scale(pattern: List<GlyphStep>, brightness: Int): List<GlyphStep> {
-        return pattern.map { step ->
-            step.copy(
-                brightness = if (step.brightness == 0) {
-                    0
-                } else {
-                    brightness.coerceIn(0, 4095)
-                }
-            )
-        }
-    }
-}
-
-class PatternStore(context: Context) {
-    private val prefs =
-        context.getSharedPreferences(
-            "oneglyph_patterns",
-            Context.MODE_PRIVATE
-        )
-
-    fun loadComposer(): MutableList<GlyphStep> {
-        val raw = prefs.getString("composer", null)
-            ?: return mutableListOf(
-                GlyphStep(4095, 180),
-                GlyphStep(0, 150),
-                GlyphStep(2600, 380)
-            )
-
-        val parsed = raw.split("|").mapNotNull { item ->
-            val parts = item.split(",")
-            if (parts.size != 2) return@mapNotNull null
-
-            val brightness = parts[0].toIntOrNull()
-                ?: return@mapNotNull null
-
-            val duration = parts[1].toLongOrNull()
-                ?: return@mapNotNull null
-
-            GlyphStep(
-                brightness.coerceIn(0, 4095),
-                duration.coerceIn(40, 3000)
-            )
-        }
-
-        return if (parsed.isEmpty()) {
-            mutableListOf(GlyphStep(4095, 180))
-        } else {
-            parsed.toMutableList()
-        }
-    }
-
-    fun saveComposer(steps: List<GlyphStep>) {
-        val raw = steps.joinToString("|") {
-            it.brightness.toString() + "," + it.durationMs
-        }
-
-        prefs.edit()
-            .putString("composer", raw)
-            .apply()
-    }
-
-    fun notificationRemindersEnabled(): Boolean =
-        prefs.getBoolean("notification_reminders", false)
-
-    fun setNotificationRemindersEnabled(enabled: Boolean) {
-        prefs.edit()
-            .putBoolean("notification_reminders", enabled)
-            .apply()
-    }
-
-    fun reminderIntervalMinutes(): Int =
-        prefs.getInt("reminder_interval", 5)
-
-    fun setReminderIntervalMinutes(minutes: Int) {
-        prefs.edit()
-            .putInt(
-                "reminder_interval",
-                minutes.coerceIn(1, 15)
-            )
-            .apply()
-    }
-
-    fun chargingEnabled(): Boolean =
-        prefs.getBoolean("charging_effect", false)
-
-    fun setChargingEnabled(enabled: Boolean) {
-        prefs.edit()
-            .putBoolean("charging_effect", enabled)
-            .apply()
-    }
-
-    fun visualizerEnabled(): Boolean =
-        prefs.getBoolean("music_visualizer", false)
-
-    fun setVisualizerEnabled(enabled: Boolean) {
-        prefs.edit()
-            .putBoolean("music_visualizer", enabled)
-            .apply()
-    }
+enum class OneGlyphTheme {
+    DARK,
+    LIGHT
 }
 
 data class MediaPlaybackInfo(
@@ -185,52 +46,251 @@ data class MediaPlaybackInfo(
     val durationMs: Long
 )
 
+object GlyphPatterns {
+    val blink = listOf(
+        GlyphStep(4095, 190),
+        GlyphStep(0, 190)
+    )
+
+    val doubleBlink = listOf(
+        GlyphStep(4095, 150),
+        GlyphStep(0, 130),
+        GlyphStep(4095, 150),
+        GlyphStep(0, 220)
+    )
+
+    val heartbeat = listOf(
+        GlyphStep(4095, 100),
+        GlyphStep(0, 90),
+        GlyphStep(4095, 180),
+        GlyphStep(0, 650)
+    )
+
+    val slowPulse = listOf(
+        GlyphStep(2300, 500),
+        GlyphStep(0, 420)
+    )
+
+    fun repeated(
+        onMs: Long,
+        offMs: Long,
+        count: Int,
+        brightness: Int = 4095
+    ): List<GlyphStep> {
+        val result = ArrayList<GlyphStep>(count * 2)
+
+        repeat(count.coerceIn(1, 16)) {
+            result += GlyphStep(
+                brightness.coerceIn(0, 4095),
+                onMs.coerceAtLeast(35L)
+            )
+            result += GlyphStep(
+                0,
+                offMs.coerceAtLeast(35L)
+            )
+        }
+
+        return result
+    }
+}
+
+class PatternStore(context: Context) {
+    private val prefs =
+        context.getSharedPreferences(
+            "oneglyph_settings",
+            Context.MODE_PRIVATE
+        )
+
+    fun appEnabled(): Boolean =
+        prefs.getBoolean("app_enabled", true)
+
+    fun setAppEnabled(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("app_enabled", enabled)
+            .apply()
+    }
+
+    fun theme(): OneGlyphTheme =
+        when (prefs.getString("theme", "DARK")) {
+            "LIGHT" -> OneGlyphTheme.LIGHT
+            else -> OneGlyphTheme.DARK
+        }
+
+    fun setTheme(theme: OneGlyphTheme) {
+        prefs.edit()
+            .putString("theme", theme.name)
+            .apply()
+    }
+
+    fun chargingEnabled(): Boolean =
+        prefs.getBoolean("charging_enabled", true)
+
+    fun setChargingEnabled(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("charging_enabled", enabled)
+            .apply()
+    }
+
+    fun chargeTarget(): Int =
+        prefs.getInt("charge_target", 80)
+            .coerceIn(80, 100)
+
+    fun setChargeTarget(percent: Int) {
+        prefs.edit()
+            .putInt(
+                "charge_target",
+                percent.coerceIn(80, 100)
+            )
+            .apply()
+    }
+
+    fun cameraSeconds(): Int =
+        prefs.getInt("camera_seconds", 5)
+            .coerceIn(3, 10)
+
+    fun setCameraSeconds(seconds: Int) {
+        prefs.edit()
+            .putInt(
+                "camera_seconds",
+                seconds.coerceIn(3, 10)
+            )
+            .apply()
+    }
+
+    fun loadComposer(): MutableList<GlyphStep> {
+        val raw = prefs.getString(
+            "composer",
+            null
+        )
+
+        if (raw.isNullOrBlank()) {
+            return mutableListOf(
+                GlyphStep(4095, 170),
+                GlyphStep(0, 150),
+                GlyphStep(2600, 350),
+                GlyphStep(0, 250)
+            )
+        }
+
+        val parsed =
+            raw.split("|").mapNotNull { item ->
+                val parts = item.split(",")
+                if (parts.size != 2) {
+                    return@mapNotNull null
+                }
+
+                val brightness =
+                    parts[0].toIntOrNull()
+                        ?: return@mapNotNull null
+
+                val duration =
+                    parts[1].toLongOrNull()
+                        ?: return@mapNotNull null
+
+                GlyphStep(
+                    brightness.coerceIn(
+                        0,
+                        4095
+                    ),
+                    duration.coerceIn(
+                        40,
+                        3000
+                    )
+                )
+            }
+
+        return if (parsed.isEmpty()) {
+            mutableListOf(
+                GlyphStep(4095, 180)
+            )
+        } else {
+            parsed.take(8).toMutableList()
+        }
+    }
+
+    fun saveComposer(
+        steps: List<GlyphStep>
+    ) {
+        prefs.edit()
+            .putString(
+                "composer",
+                steps.joinToString("|") {
+                    it.brightness.toString() +
+                        "," +
+                        it.durationMs
+                }
+            )
+            .apply()
+    }
+}
+
+class GlyphMediaSessionService :
+    NotificationListenerService()
+
 class MediaPlaybackWatcher(
     context: Context,
-    private val onChanged: (MediaPlaybackInfo?) -> Unit,
-    private val onAccessError: () -> Unit
+    private val onChanged:
+        (MediaPlaybackInfo?) -> Unit,
+    private val onAccessError:
+        () -> Unit
 ) : AutoCloseable {
-    private val appContext = context.applicationContext
+    private val appContext =
+        context.applicationContext
+
     private val manager =
         appContext.getSystemService(
-            android.media.session.MediaSessionManager::class.java
+            MediaSessionManager::class.java
         )
+
     private val handler =
         android.os.Handler(
             android.os.Looper.getMainLooper()
         )
-    private val listener =
-        android.media.session.MediaSessionManager
-            .OnActiveSessionsChangedListener { controllers ->
-                selectController(controllers)
+
+    private var current:
+        MediaController? = null
+
+    private val component =
+        ComponentName(
+            appContext,
+            GlyphMediaSessionService::class.java
+        )
+
+    private val ticker =
+        object : Runnable {
+            override fun run() {
+                publish()
+                handler.postDelayed(
+                    this,
+                    350L
+                )
+            }
+        }
+
+    private val sessionsListener =
+        MediaSessionManager
+            .OnActiveSessionsChangedListener { sessions ->
+                select(
+                    sessions
+                )
             }
 
-    private var currentController:
-        android.media.session.MediaController? = null
-
-    private val ticker = object : Runnable {
-        override fun run() {
-            publish()
-            handler.postDelayed(this, 350L)
-        }
-    }
-
     private val callback =
-        object : android.media.session.MediaController.Callback() {
+        object : MediaController.Callback() {
             override fun onPlaybackStateChanged(
-                state: android.media.session.PlaybackState?
+                state: PlaybackState?
             ) {
                 publish()
             }
 
             override fun onMetadataChanged(
-                metadata: android.media.MediaMetadata?
+                metadata: MediaMetadata?
             ) {
                 publish()
             }
 
             override fun onSessionDestroyed() {
-                currentController = null
+                current = null
                 onChanged(null)
                 refresh()
             }
@@ -238,14 +298,13 @@ class MediaPlaybackWatcher(
 
     fun start() {
         try {
-            manager.addOnActiveSessionsChangedListener(
-                listener,
-                android.content.ComponentName(
-                    appContext,
-                    GlyphNotificationListenerService::class.java
-                ),
-                handler
-            )
+            manager
+                .addOnActiveSessionsChangedListener(
+                    sessionsListener,
+                    component,
+                    handler
+                )
+
             refresh()
             handler.post(ticker)
         } catch (_: SecurityException) {
@@ -257,12 +316,9 @@ class MediaPlaybackWatcher(
 
     fun refresh() {
         try {
-            selectController(
+            select(
                 manager.getActiveSessions(
-                    android.content.ComponentName(
-                        appContext,
-                        GlyphNotificationListenerService::class.java
-                    )
+                    component
                 )
             )
         } catch (_: SecurityException) {
@@ -272,28 +328,30 @@ class MediaPlaybackWatcher(
         }
     }
 
-    private fun selectController(
-        controllers:
-            List<android.media.session.MediaController>?
+    private fun select(
+        sessions:
+            List<MediaController>?
     ) {
-        val list = controllers.orEmpty()
-
         val preferred =
-            list.firstOrNull {
+            sessions.orEmpty().firstOrNull {
                 it.playbackState?.state ==
-                    android.media.session.PlaybackState.STATE_PLAYING
-            } ?: list.firstOrNull {
+                    PlaybackState.STATE_PLAYING
+            } ?: sessions.orEmpty().firstOrNull {
                 it.metadata != null
             }
 
-        if (preferred === currentController) {
+        if (preferred == current) {
             publish()
             return
         }
 
-        currentController?.unregisterCallback(callback)
-        currentController = preferred
-        currentController?.registerCallback(
+        current?.unregisterCallback(
+            callback
+        )
+
+        current = preferred
+
+        current?.registerCallback(
             callback,
             handler
         )
@@ -302,52 +360,62 @@ class MediaPlaybackWatcher(
     }
 
     private fun publish() {
-        val controller = currentController ?: run {
-            onChanged(null)
-            return
-        }
+        val controller =
+            current ?: run {
+                onChanged(null)
+                return
+            }
 
-        val state = controller.playbackState
-        val metadata = controller.metadata
+        val state =
+            controller.playbackState
+
+        val metadata =
+            controller.metadata
 
         val duration =
             metadata?.getLong(
-                android.media.MediaMetadata.METADATA_KEY_DURATION
+                MediaMetadata.METADATA_KEY_DURATION
             ) ?: 0L
 
         onChanged(
             MediaPlaybackInfo(
-                packageName = controller.packageName ?: "",
+                packageName =
+                    controller.packageName
+                        .orEmpty(),
                 title =
                     metadata?.getString(
-                        android.media.MediaMetadata
-                            .METADATA_KEY_TITLE
+                        MediaMetadata.METADATA_KEY_TITLE
                     ).orEmpty(),
                 artist =
                     metadata?.getString(
-                        android.media.MediaMetadata
-                            .METADATA_KEY_ARTIST
+                        MediaMetadata.METADATA_KEY_ARTIST
                     ).orEmpty(),
                 isPlaying =
                     state?.state ==
-                        android.media.session.PlaybackState.STATE_PLAYING,
+                        PlaybackState.STATE_PLAYING,
                 positionMs =
-                    state?.position?.coerceAtLeast(0L)
+                    state?.position
+                        ?.coerceAtLeast(0L)
                         ?: 0L,
-                durationMs = duration.coerceAtLeast(0L)
+                durationMs =
+                    duration.coerceAtLeast(0L)
             )
         )
     }
 
     override fun close() {
         handler.removeCallbacks(ticker)
-        currentController?.unregisterCallback(callback)
-        currentController = null
+
+        current?.unregisterCallback(
+            callback
+        )
+        current = null
 
         try {
-            manager.removeOnActiveSessionsChangedListener(
-                listener
-            )
+            manager
+                .removeOnActiveSessionsChangedListener(
+                    sessionsListener
+                )
         } catch (_: Throwable) {
         }
 
@@ -357,26 +425,26 @@ class MediaPlaybackWatcher(
 
 class MusicBeatVisualizer(
     private val context: Context,
-    private val onBeat: (brightness: Int) -> Unit
+    private val onBeat:
+        (brightness: Int) -> Unit
 ) {
-    private var visualizer: Visualizer? = null
-    private var previousMagnitudes =
+    private var visualizer:
+        Visualizer? = null
+
+    private var previous =
         DoubleArray(32)
 
-    private val onsetHistory =
+    private val fluxHistory =
         ArrayDeque<Double>()
 
-    private var lastBeatMs = 0L
+    private var lastBeatMs =
+        0L
 
     fun start(): Boolean {
-        val permission =
-            ContextCompat.checkSelfPermission(
-                context,
+        if (
+            context.checkSelfPermission(
                 Manifest.permission.RECORD_AUDIO
-            )
-
-        if (permission !=
-            PackageManager.PERMISSION_GRANTED
+            ) != PackageManager.PERMISSION_GRANTED
         ) {
             return false
         }
@@ -384,13 +452,14 @@ class MusicBeatVisualizer(
         return try {
             stop()
 
-            previousMagnitudes =
+            previous =
                 DoubleArray(32)
 
-            onsetHistory.clear()
+            fluxHistory.clear()
             lastBeatMs = 0L
 
-            val v = Visualizer(0)
+            val v =
+                Visualizer(0)
 
             v.captureSize =
                 Visualizer
@@ -401,13 +470,15 @@ class MusicBeatVisualizer(
                 object :
                     Visualizer.OnDataCaptureListener {
 
-                    override fun onWaveFormDataCapture(
+                    override fun
+                        onWaveFormDataCapture(
                         capture: Visualizer,
                         waveform: ByteArray,
                         samplingRate: Int
                     ) = Unit
 
-                    override fun onFftDataCapture(
+                    override fun
+                        onFftDataCapture(
                         capture: Visualizer,
                         fft: ByteArray,
                         samplingRate: Int
@@ -415,14 +486,15 @@ class MusicBeatVisualizer(
                         val maxBin =
                             minOf(
                                 30,
-                                (fft.size / 2) - 1
+                                fft.size / 2 - 1
                             )
 
-                        if (maxBin < 4) return
+                        if (maxBin < 4) {
+                            return
+                        }
 
                         var flux = 0.0
-                        var lowEnergy = 0.0
-                        var energy = 0.0
+                        var low = 0.0
 
                         for (bin in 2..maxBin) {
                             val real =
@@ -441,117 +513,110 @@ class MusicBeatVisualizer(
                                     ).toDouble()
                                 )
 
-                            val previous =
-                                previousMagnitudes[
-                                    bin
-                                ]
-
                             val delta =
                                 (
                                     magnitude -
-                                        previous
-                                ).coerceAtLeast(0.0)
+                                        previous[
+                                            bin
+                                        ]
+                                ).coerceAtLeast(
+                                    0.0
+                                )
 
-                            // Bass and low-mid bins get more influence,
-                            // which makes kick/snare transients much more
-                            // useful for a single light.
                             val weight =
                                 when {
-                                    bin <= 6 -> 1.8
-                                    bin <= 14 -> 1.35
-                                    else -> 0.8
+                                    bin <= 6 ->
+                                        2.0
+
+                                    bin <= 14 ->
+                                        1.35
+
+                                    else ->
+                                        0.75
                                 }
 
-                            flux += delta * weight
-                            energy +=
-                                magnitude * weight
+                            flux +=
+                                delta * weight
 
                             if (bin <= 10) {
-                                lowEnergy +=
+                                low +=
                                     magnitude
                             }
 
-                            previousMagnitudes[
+                            previous[
                                 bin
                             ] = magnitude
                         }
 
-                        onsetHistory.addLast(flux)
+                        fluxHistory.addLast(
+                            flux
+                        )
 
                         while (
-                            onsetHistory.size > 24
+                            fluxHistory.size > 24
                         ) {
-                            onsetHistory.removeFirst()
+                            fluxHistory.removeFirst()
                         }
 
                         if (
-                            onsetHistory.size < 8
+                            fluxHistory.size < 8
                         ) {
                             return
                         }
 
                         val baseline =
-                            onsetHistory
+                            fluxHistory
                                 .dropLast(1)
                                 .average()
-                                .coerceAtLeast(1.0)
+                                .coerceAtLeast(
+                                    1.0
+                                )
+
+                        val recentBaseline =
+                            fluxHistory
+                                .dropLast(1)
+                                .takeLast(4)
+                                .average()
+                                .coerceAtLeast(
+                                    1.0
+                                )
 
                         val ratio =
                             flux /
                                 baseline
 
+                        val rising =
+                            flux >
+                                recentBaseline * 1.05
+
                         val now =
                             SystemClock
                                 .uptimeMillis()
 
-                        val risingEnough =
-                            flux >
-                                onsetHistory
-                                    .dropLast(1)
-                                    .takeLast(3)
-                                    .average()
-                                    .coerceAtLeast(1.0)
-
-                        val cooldown =
+                        if (
+                            ratio >= 1.5 &&
+                            rising &&
                             now - lastBeatMs >=
                                 170L
+                        ) {
+                            lastBeatMs = now
 
-                        val beat =
-                            ratio >= 1.55 &&
-                                risingEnough &&
-                                cooldown
-
-                        if (!beat) return
-
-                        lastBeatMs = now
-
-                        val kickBoost =
-                            (
-                                lowEnergy /
-                                    (
-                                        energy /
-                                            4.0
-                                    ).coerceAtLeast(
-                                        1.0
-                                    )
-                            ).coerceIn(
-                                0.6,
-                                1.6
-                            )
-
-                        val strength =
-                            (
-                                ratio *
-                                    2200.0 *
-                                    kickBoost
-                            )
-                                .toInt()
-                                .coerceIn(
-                                    1800,
-                                    4095
+                            val strength =
+                                (
+                                    ratio *
+                                        2200.0 +
+                                        low * 4.0
                                 )
+                                    .toInt()
+                                    .coerceIn(
+                                        1800,
+                                        4095
+                                    )
 
-                        onBeat(strength)
+                            onBeat(
+                                strength
+                            )
+                        }
                     }
                 },
                 Visualizer
@@ -562,13 +627,8 @@ class MusicBeatVisualizer(
 
             v.enabled = true
             visualizer = v
+
             true
-        } catch (_: SecurityException) {
-            stop()
-            false
-        } catch (_: UnsupportedOperationException) {
-            stop()
-            false
         } catch (_: Throwable) {
             stop()
             false
@@ -577,21 +637,25 @@ class MusicBeatVisualizer(
 
     fun stop() {
         try {
-            visualizer?.enabled = false
+            visualizer?.enabled =
+                false
+
             visualizer?.release()
         } catch (_: Throwable) {
         }
 
         visualizer = null
-        onsetHistory.clear()
+        fluxHistory.clear()
     }
 }
 
 class BeatSyncController(
     context: Context,
     private val glyph: GlyphController,
-    private val onState: (MediaPlaybackInfo?) -> Unit,
-    private val onError: (String) -> Unit
+    private val onState:
+        (MediaPlaybackInfo?) -> Unit,
+    private val onError:
+        (String) -> Unit
 ) : AutoCloseable {
     private val appContext =
         context.applicationContext
@@ -602,78 +666,83 @@ class BeatSyncController(
     private var visualizer:
         MusicBeatVisualizer? = null
 
-    private var lastTrackKey = ""
+    private var trackKey =
+        ""
 
     fun start() {
-        if (watcher != null) return
+        if (watcher != null) {
+            return
+        }
 
-        watcher = MediaPlaybackWatcher(
-            appContext,
-            onChanged = { info ->
-                onState(info)
-                handlePlayback(info)
-            },
-            onAccessError = {
-                stopAudio()
-                onError(
-                    "Turn on Media Access to let OneGlyph see what's playing."
-                )
-            }
-        )
+        watcher =
+            MediaPlaybackWatcher(
+                appContext,
+                onChanged = {
+                    onState(it)
+                    handle(it)
+                },
+                onAccessError = {
+                    stopAudio()
+                    onError(
+                        "Turn on Media Access in Settings."
+                    )
+                }
+            )
 
         watcher?.start()
     }
 
-    private fun handlePlayback(
+    fun refresh() {
+        watcher?.refresh()
+    }
+
+    private fun handle(
         info: MediaPlaybackInfo?
     ) {
-        if (info == null) {
+        if (
+            info == null ||
+            !info.isPlaying
+        ) {
             stopAudio()
             return
         }
 
-        val trackKey =
+        val newKey =
             info.packageName +
                 "|" +
                 info.title +
                 "|" +
                 info.artist
 
-        if (
-            info.isPlaying &&
-            trackKey != lastTrackKey
+        if (newKey != trackKey) {
+            trackKey = newKey
+            restart()
+        } else if (
+            visualizer == null
         ) {
-            lastTrackKey = trackKey
-            restartAudio()
-            return
-        }
-
-        if (info.isPlaying) {
-            if (visualizer == null) {
-                restartAudio()
-            }
-        } else {
-            stopAudio()
+            restart()
         }
     }
 
-    private fun restartAudio() {
+    private fun restart() {
         visualizer?.stop()
 
         val next =
             MusicBeatVisualizer(
                 appContext
-            ) { brightness ->
-                if (glyph.isReady()) {
+            ) {
+                if (
+                    glyph.isReady()
+                ) {
                     glyph.playPattern(
                         listOf(
                             GlyphStep(
-                                brightness,
-                                75
+                                it,
+                                70
                             ),
                             GlyphStep(
                                 0,
-                                95
+                                90
                             )
                         )
                     )
@@ -685,7 +754,7 @@ class BeatSyncController(
         } else {
             visualizer = null
             onError(
-                "Audio access is needed for Beat Sync."
+                "Beat Sync could not access the audio output."
             )
         }
     }
@@ -696,14 +765,11 @@ class BeatSyncController(
         glyph.stopPattern()
     }
 
-    fun refresh() {
-        watcher?.refresh()
-    }
-
     override fun close() {
         stopAudio()
         watcher?.close()
         watcher = null
+        trackKey = ""
     }
 }
 
@@ -712,94 +778,373 @@ object GlyphAction {
         context: Context,
         steps: List<GlyphStep>
     ) {
+        val store =
+            PatternStore(context)
+
+        if (!store.appEnabled()) {
+            return
+        }
+
         val controller =
-            GlyphController(context.applicationContext)
+            GlyphController(
+                context.applicationContext
+            )
 
         try {
-            if (!controller.awaitReady()) return
+            if (
+                !controller.awaitReady()
+            ) {
+                return
+            }
 
-            controller.playPattern(steps)
+            controller.playPattern(
+                steps
+            )
+
             delay(
-                steps.sumOf { it.durationMs } + 100L
+                steps.sumOf {
+                    it.durationMs
+                } + 100L
             )
         } finally {
             controller.close()
         }
     }
+}
 
-    fun playRingtoneAndPattern(
+object CameraCountdown {
+    fun start(
         context: Context,
-        steps: List<GlyphStep>,
-        loops: Int = 3
+        controller: GlyphController,
+        seconds: Int
     ) {
-        val ringtoneUri =
-            RingtoneManager.getActualDefaultRingtoneUri(
-                context,
-                RingtoneManager.TYPE_RINGTONE
-            )
+        val store =
+            PatternStore(context)
 
-        val ringtone =
-            RingtoneManager.getRingtone(
-                context,
-                ringtoneUri
-            )
-
-        try {
-            ringtone?.play()
-        } catch (_: Throwable) {
+        if (!store.appEnabled()) {
+            return
         }
 
-        CoroutineScope(Dispatchers.IO).launch {
-            val controller =
-                GlyphController(context.applicationContext)
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.MediaStore
+                        .INTENT_ACTION_STILL_IMAGE_CAMERA
+                )
+            )
+        } catch (_: Throwable) {
+            return
+        }
 
-            try {
-                if (!controller.awaitReady()) return@launch
+        val duration =
+            seconds.coerceIn(3, 10) * 1000L
 
-                repeat(loops.coerceIn(1, 6)) {
-                    controller.playPattern(steps)
-                    delay(
-                        steps.sumOf { it.durationMs } + 120L
+        CoroutineScope(
+            Dispatchers.IO
+        ).launch {
+            val start =
+                SystemClock
+                    .uptimeMillis()
+
+            while (
+                SystemClock.uptimeMillis() -
+                    start <
+                    duration
+            ) {
+                val elapsed =
+                    (
+                        SystemClock.uptimeMillis() -
+                            start
+                    ).coerceAtLeast(
+                        0L
                     )
-                }
-            } finally {
-                try {
-                    ringtone?.stop()
-                } catch (_: Throwable) {
-                }
 
-                controller.close()
+                val progress =
+                    (
+                        elapsed.toFloat() /
+                            duration
+                    ).coerceIn(
+                        0f,
+                        0.999f
+                    )
+
+                val cycleMs =
+                    (
+                        700L -
+                            progress * 560L
+                    ).toLong().coerceAtLeast(
+                        140L
+                    )
+
+                val onMs =
+                    (
+                        105L -
+                            progress * 45L
+                    ).toLong().coerceAtLeast(
+                        55L
+                    )
+
+                controller.playPattern(
+                    listOf(
+                        GlyphStep(
+                            2500 +
+                                (1500 * progress)
+                                    .toInt(),
+                            onMs
+                        ),
+                        GlyphStep(
+                            0,
+                            (
+                                cycleMs -
+                                    onMs
+                            ).coerceAtLeast(
+                                55L
+                            )
+                        )
+                    )
+                )
+
+                delay(
+                    cycleMs
+                )
             }
+
+            controller.playPattern(
+                listOf(
+                    GlyphStep(
+                        4095,
+                        180
+                    ),
+                    GlyphStep(
+                        0,
+                        250
+                    )
+                )
+            )
         }
     }
 }
 
-object NotificationReminderScheduler {
-    private const val REQUEST_BASE = 7000
-    private const val EXTRA_KEY = "notification_key"
+object ChargingMonitor {
+    private const val CHECK_ACTION =
+        "com.jackson4rocks.oneglyph.CHECK_CHARGING"
 
-    fun schedule(
+    private const val REQUEST_CODE =
+        9043
+
+    private const val ACTIVE =
+        "charging_active"
+
+    private const val MILESTONE =
+        "charging_milestone"
+
+    fun onPowerConnected(
+        context: Context
+    ) {
+        val store =
+            PatternStore(context)
+
+        if (
+            !store.appEnabled() ||
+            !store.chargingEnabled()
+        ) {
+            return
+        }
+
+        storePrefs(context)
+            .edit()
+            .putBoolean(ACTIVE, true)
+            .putBoolean(MILESTONE, false)
+            .apply()
+
+        CoroutineScope(
+            Dispatchers.IO
+        ).launch {
+            GlyphAction.playOnce(
+                context,
+                GlyphPatterns.repeated(
+                    onMs = 180,
+                    offMs = 180,
+                    count = 4
+                )
+            )
+        }
+
+        scheduleCheck(
+            context,
+            60_000L
+        )
+    }
+
+    fun onPowerDisconnected(
+        context: Context
+    ) {
+        cancelCheck(context)
+
+        storePrefs(context)
+            .edit()
+            .putBoolean(ACTIVE, false)
+            .putBoolean(MILESTONE, false)
+            .apply()
+    }
+
+    fun onBoot(
+        context: Context
+    ) {
+        val battery =
+            context.registerReceiver(
+                null,
+                IntentFilter(
+                    Intent.ACTION_BATTERY_CHANGED
+                )
+            )
+
+        val plugged =
+            battery?.getIntExtra(
+                BatteryManager.EXTRA_PLUGGED,
+                0
+            ) ?: 0
+
+        if (plugged != 0) {
+            onPowerConnected(
+                context
+            )
+        }
+    }
+
+    fun check(
+        context: Context
+    ) {
+        val store =
+            PatternStore(context)
+
+        val prefs =
+            storePrefs(context)
+
+        if (
+            !store.appEnabled() ||
+            !store.chargingEnabled()
+        ) {
+            cancelCheck(context)
+            return
+        }
+
+        val battery =
+            context.registerReceiver(
+                null,
+                IntentFilter(
+                    Intent.ACTION_BATTERY_CHANGED
+                )
+            )
+
+        val plugged =
+            battery?.getIntExtra(
+                BatteryManager.EXTRA_PLUGGED,
+                0
+            ) ?: 0
+
+        if (plugged == 0) {
+            onPowerDisconnected(
+                context
+            )
+            return
+        }
+
+        val level =
+            battery?.getIntExtra(
+                BatteryManager.EXTRA_LEVEL,
+                0
+            ) ?: 0
+
+        val scale =
+            battery?.getIntExtra(
+                BatteryManager.EXTRA_SCALE,
+                100
+            ) ?: 100
+
+        val percent =
+            if (scale > 0) {
+                level * 100 / scale
+            } else {
+                0
+            }
+
+        val target =
+            store.chargeTarget()
+
+        val active =
+            prefs.getBoolean(
+                ACTIVE,
+                false
+            )
+
+        val done =
+            prefs.getBoolean(
+                MILESTONE,
+                false
+            )
+
+        if (
+            active &&
+            !done &&
+            percent >= target
+        ) {
+            prefs.edit()
+                .putBoolean(
+                    MILESTONE,
+                    true
+                )
+                .apply()
+
+            CoroutineScope(
+                Dispatchers.IO
+            ).launch {
+                GlyphAction.playOnce(
+                    context,
+                    GlyphPatterns.repeated(
+                        onMs = 120,
+                        offMs = 110,
+                        count = 9
+                    )
+                )
+            }
+        }
+
+        scheduleCheck(
+            context,
+            60_000L
+        )
+    }
+
+    private fun storePrefs(
+        context: Context
+    ) =
+        context.getSharedPreferences(
+            "oneglyph_charging",
+            Context.MODE_PRIVATE
+        )
+
+    private fun scheduleCheck(
         context: Context,
-        key: String,
-        minutes: Int
+        delayMs: Long
     ) {
         val alarm =
-            context.getSystemService(AlarmManager::class.java)
+            context.getSystemService(
+                AlarmManager::class.java
+            )
 
         val intent =
             Intent(
                 context,
-                NotificationReminderReceiver::class.java
-            ).putExtra(EXTRA_KEY, key)
-
-        val requestCode =
-            REQUEST_BASE +
-                (key.hashCode() and 0x3fff)
+                ChargingCheckReceiver::class.java
+            ).setAction(
+                CHECK_ACTION
+            )
 
         val pending =
             PendingIntent.getBroadcast(
                 context,
-                requestCode,
+                REQUEST_CODE,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or
                     PendingIntent.FLAG_IMMUTABLE
@@ -808,122 +1153,38 @@ object NotificationReminderScheduler {
         alarm.setAndAllowWhileIdle(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
             SystemClock.elapsedRealtime() +
-                minutes.coerceIn(1, 15) * 60_000L,
+                delayMs,
             pending
         )
     }
 
-    fun cancel(
-        context: Context,
-        key: String
+    private fun cancelCheck(
+        context: Context
     ) {
         val alarm =
-            context.getSystemService(AlarmManager::class.java)
-
-        val requestCode =
-            REQUEST_BASE +
-                (key.hashCode() and 0x3fff)
+            context.getSystemService(
+                AlarmManager::class.java
+            )
 
         val intent =
             Intent(
                 context,
-                NotificationReminderReceiver::class.java
+                ChargingCheckReceiver::class.java
             )
 
         val pending =
             PendingIntent.getBroadcast(
                 context,
-                requestCode,
+                REQUEST_CODE,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or
                     PendingIntent.FLAG_IMMUTABLE
             )
 
-        alarm.cancel(pending)
+        alarm.cancel(
+            pending
+        )
         pending.cancel()
-    }
-
-    fun keyFrom(intent: Intent): String? =
-        intent.getStringExtra(EXTRA_KEY)
-}
-
-class GlyphNotificationListenerService :
-    NotificationListenerService() {
-
-    override fun onNotificationPosted(
-        sbn: StatusBarNotification
-    ) {
-        if (sbn.packageName == packageName) return
-
-        val store = PatternStore(this)
-        if (!store.notificationRemindersEnabled()) {
-            return
-        }
-
-        NotificationReminderScheduler.schedule(
-            this,
-            sbn.key,
-            store.reminderIntervalMinutes()
-        )
-    }
-
-    override fun onNotificationRemoved(
-        sbn: StatusBarNotification
-    ) {
-        NotificationReminderScheduler.cancel(
-            this,
-            sbn.key
-        )
-    }
-}
-
-class NotificationReminderReceiver :
-    BroadcastReceiver() {
-
-    override fun onReceive(
-        context: Context,
-        intent: Intent
-    ) {
-        val pending = goAsync()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val key =
-                    NotificationReminderScheduler.keyFrom(
-                        intent
-                    ) ?: return@launch
-
-                val store = PatternStore(context)
-                if (!store.notificationRemindersEnabled()) {
-                    return@launch
-                }
-
-                val controller =
-                    GlyphController(
-                        context.applicationContext
-                    )
-
-                try {
-                    if (controller.awaitReady()) {
-                        controller.playPattern(
-                            GlyphPatterns.double
-                        )
-
-                        delay(550L)
-
-                        NotificationReminderScheduler.schedule(
-                            context,
-                            key,
-                            store.reminderIntervalMinutes()
-                        )
-                    }
-                } finally {
-                    controller.close()
-                }
-            } finally {
-                pending.finish()
-            }
-        }
     }
 }
 
@@ -934,31 +1195,37 @@ class ChargingEffectReceiver :
         context: Context,
         intent: Intent
     ) {
-        if (
-            intent.action != Intent.ACTION_POWER_CONNECTED &&
-            intent.action != Intent.ACTION_POWER_DISCONNECTED
-        ) {
-            return
+        when (intent.action) {
+            Intent.ACTION_POWER_CONNECTED ->
+                ChargingMonitor
+                    .onPowerConnected(
+                        context
+                    )
+
+            Intent.ACTION_POWER_DISCONNECTED ->
+                ChargingMonitor
+                    .onPowerDisconnected(
+                        context
+                    )
+
+            Intent.ACTION_BOOT_COMPLETED ->
+                ChargingMonitor
+                    .onBoot(
+                        context
+                    )
         }
+    }
+}
 
-        val store = PatternStore(context)
-        if (!store.chargingEnabled()) return
+class ChargingCheckReceiver :
+    BroadcastReceiver() {
 
-        CoroutineScope(Dispatchers.IO).launch {
-            val pattern =
-                if (
-                    intent.action ==
-                    Intent.ACTION_POWER_CONNECTED
-                ) {
-                    GlyphPatterns.chargingStart
-                } else {
-                    GlyphPatterns.single
-                }
-
-            GlyphAction.playOnce(
-                context,
-                pattern
-            )
-        }
+    override fun onReceive(
+        context: Context,
+        intent: Intent
+    ) {
+        ChargingMonitor.check(
+            context
+        )
     }
 }
