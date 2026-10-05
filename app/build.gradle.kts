@@ -1,3 +1,6 @@
+import HttpURLConnection
+import java.net.URI
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -64,11 +67,11 @@ val bundleLeonProfile = tasks.register("bundleLeonProfile") {
         output.parentFile.mkdirs()
 
         val connection =
-            java.net.URI(
+            URI(
                 "https://github.com/Jackson4Rocks.png?size=256"
             )
                 .toURL()
-                .openConnection() as java.net.HttpURLConnection
+                .openConnection() as HttpURLConnection
 
         connection.connectTimeout = 10_000
         connection.readTimeout = 10_000
