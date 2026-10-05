@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -54,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,10 +75,7 @@ private val Panel = Color(0xFF0A0A0A)
 private val NDotFamily = runCatching {
     FontFamily(
         Font(
-            Typeface.create(
-                "NDot55All",
-                Typeface.NORMAL
-            )
+            DeviceFontFamilyName("NDot55All")
         )
     )
 }.getOrElse {
