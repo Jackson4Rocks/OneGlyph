@@ -48,9 +48,6 @@ dependencies {
 }
 
 
-import java.net.HttpURLConnection
-import java.net.URI
-
 val bundleLeonProfile = tasks.register("bundleLeonProfile") {
     val output =
         file(
