@@ -1,0 +1,9 @@
+android_app_import {
+    name: "OneGlyph",
+    apk: "OneGlyph.apk",
+    privileged: true,
+    certificate: "platform",
+    dex_preopt: {
+        enabled: false,
+    },
+}
