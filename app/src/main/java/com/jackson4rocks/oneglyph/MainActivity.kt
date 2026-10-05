@@ -264,8 +264,11 @@ private fun OneGlyphApp() {
             }
 
             val visualizer =
-                MusicVisualizer(context) { level ->
+                MusicBeatVisualizer(context) { level, beat ->
                     controller.setBrightness(level)
+                    if (beat) {
+                        status = "BEAT SYNC • HIT"
+                    }
                 }
 
             if (!visualizer.start()) {
@@ -957,16 +960,16 @@ private fun ModesPage(
     )
 
     FeatureCard(
-        title = "MUSIC VISUALIZER",
+        title = "BEAT SYNC",
         body =
-            "React to the audio mix with live brightness changes.",
+            "Read the phone's current audio output and flash the Glyph on detected beats.",
         active = visualizerOn,
         action = onVisualizer,
         actionText =
             if (visualizerOn) {
-                "STOP VISUALIZER"
+                "STOP BEAT SYNC"
             } else {
-                "START VISUALIZER"
+                "START BEAT SYNC"
             }
     )
 
