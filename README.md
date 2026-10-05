@@ -1,49 +1,165 @@
-# OneGlyph
+<div align="center">
+  <img src="assets/oneglyph.svg" width="128" alt="OneGlyph icon" />
 
-**Make the one dot do more.**
+  # OneGlyph
 
-OneGlyph is an open-source Android app for the Nothing Phone 3a Lite (Galaxian) that turns the single Glyph dot into something programmable.
+  **Make the one dot do more.**
 
-## First milestone
+  A simple, user-friendly way to control and play with the single Glyph dot on the **Nothing Phone (3a) Lite (Galaxian)**.
+</div>
 
-- Discover the lights exposed by the ROM
-- Select the Glyph light
-- Turn it on and off
-- Control intensity with Android's `LightState`
-- Run blink, pulse, and heartbeat patterns
-- Stay independent from Nothing's proprietary Glyph UI/framework
+---
 
-## Architecture
+## What is OneGlyph?
 
-`OneGlyph -> LightsManager -> Android lights service -> ROM AIDL Light HAL -> noth_leds -> Glyph dot`
+OneGlyph turns the tiny Glyph dot on your phone into a useful little tool instead of leaving it sitting there.
 
-OneGlyph uses Android's standard `android.hardware.lights.LightsManager` path. Android gates that API with `android.permission.CONTROL_DEVICE_LIGHTS`, so this project is intended to be installed as a privileged ROM app rather than trying to bypass the permission.
+You can make the dot:
 
-The custom ROM also needs a Glyph-aware light HAL. The existing Galaxian open-source HAL is backlight-only, so the app cannot make the dot work until the HAL exposes the Glyph IDs.
+- blink to simple patterns
+- react to music beats
+- show charging feedback
+- run camera countdown flashes
+- play your own custom sequences
+- run a silly **Dot Toy** that flashes continuously until you turn it off
 
-## ROM integration
+The app is designed to be **easy to use first**, while still giving developers enough control to experiment with the Glyph.
 
-The `rom/` directory contains:
+## Features
 
-- `OneGlyph.mk` — adds the APK to the product
-- `Android.bp` — imports the APK as a privileged, platform-signed app
-- `privapp-permissions-com.jackson4rocks.oneglyph.xml` — grants `CONTROL_DEVICE_LIGHTS`
+### 🎵 Beat Sync
 
-For a source ROM build, put the built APK at `rom/OneGlyph.apk`, add the module to the product, and include the permission XML in the ROM's privileged-permissions set.
+Connect OneGlyph to your currently playing media and let the dot react to the music.
 
-## Important
+Beat Sync uses the Android media session and audio output to detect rhythmic changes, then sends short flashes to the Glyph rather than leaving it permanently lit.
 
-This repository does **not** include Nothing's proprietary framework or extracted Nothing APK code.
+> Beat Sync needs **Media Access** and audio-related permission on the device.
 
-The first animations are app-driven by repeatedly submitting ordinary `LightState` requests. That keeps the first version simple. Later releases can add a proper composer and move timing/effects to a ROM-side effect layer where that makes sense.
+### ✨ Blink patterns
 
-## Roadmap
+Quick built-in patterns are ready from the Home screen:
 
-1. Basic dot control — current
-2. Saved Glyph Composer sequences
-3. Notification reminder patterns
-4. Charging effects
-5. Camera countdown
-6. Music visualization
-7. Ringtone/notification pattern playback
-8. Background effect service with battery-safe limits
+- Blink
+- Double Blink
+- Heartbeat
+- Stop
+
+### 🧩 Glyph Composer
+
+Build your own sequence with up to **8 steps**.
+
+Each step can have its own:
+
+- brightness
+- duration
+
+You can preview the sequence, then save it for later.
+
+### 🔋 Charging effects
+
+OneGlyph can react when you plug your phone in and when your chosen battery target is reached.
+
+The current effects are:
+
+- **4 blinks** when charging starts
+- **9 blinks** when the selected target is reached
+
+Targets: **80%, 90%, or 100%**
+
+### 📷 Camera Countdown
+
+Start a camera countdown with the Glyph acting as a visual timer.
+
+The flashes become faster as the countdown gets closer to the end.
+
+Available timers:
+
+- 3 seconds
+- 5 seconds
+- 10 seconds
+
+The countdown launches the phone's normal camera. OneGlyph does **not** remotely press the shutter.
+
+### ● Dot Toy
+
+A tiny built-in experiment for no particular reason.
+
+Turn it on and the Glyph flashes quickly and continuously. Press the button again to stop it.
+
+## Getting started
+
+1. Install the OneGlyph APK on a supported Nothing Phone.
+2. Open OneGlyph.
+3. Turn **OneGlyph** on in Settings.
+4. Start with **Blink** on the Home screen.
+5. For Beat Sync, open **Media Access** and allow OneGlyph to access active media sessions.
+6. Adjust the settings to your liking.
+
+The Home screen is intentionally focused on the things you are most likely to use. Advanced controls live in **Composer** and **Settings**.
+
+## Settings
+
+OneGlyph includes settings for:
+
+| Setting | What it does |
+| --- | --- |
+| OneGlyph | Master on/off switch for the app |
+| Appearance | Switch between dark and light mode |
+| Charging Effects | Enable or disable charging feedback |
+| Charge Target | Choose 80%, 90%, or 100% |
+| Camera Timer | Choose 3s, 5s, or 10s |
+| Media Access | Open Android's media-access settings |
+| Project Maintainer | Information about the project and its maintainer |
+
+## Compatibility
+
+OneGlyph is currently built for the **Nothing Phone (3a) Lite / Galaxian** and depends on the Glyph functionality provided by the stock Nothing software on that device.
+
+It is **not** a universal Glyph framework replacement and is not intended to be a generic lighting app for every Android phone.
+
+## A note for developers
+
+OneGlyph talks to the stock Nothing Glyph service rather than relying on the normal Android `LightsManager` API, which does not expose the Glyph dot normally on this device.
+
+The project keeps the device-specific Glyph integration inside `GlyphController.kt`, while the user-facing effects live in the app layer.
+
+Useful places to start:
+
+```text
+app/src/main/java/com/jackson4rocks/oneglyph/
+├── GlyphController.kt   # Glyph service / Binder integration
+├── GlyphFeatures.kt     # effects, media, charging and camera logic
+└── MainActivity.kt      # Compose UI
+```
+
+## Building
+
+The project uses:
+
+- Android Gradle Plugin 9.1.1
+- Kotlin + Jetpack Compose
+- Android SDK 36
+- JDK 17
+
+A GitHub Actions workflow builds a debug APK on every push to `main`.
+
+## Project status
+
+OneGlyph is an **active experiment** built specifically around the Glyph dot on Galaxian.
+
+The app is intentionally focused on small, useful effects rather than trying to recreate Nothing's entire Glyph experience.
+
+## License
+
+See the repository for the current license and project files.
+
+---
+
+<div align="center">
+
+**One dot. A lot more possibilities.**
+
+Made by **Leon**  
+[GitHub](https://github.com/Jackson4Rocks)
+
+</div>
