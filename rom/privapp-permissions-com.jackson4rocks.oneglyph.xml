@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<permissions>
+    <privapp-permissions package="com.jackson4rocks.oneglyph">
+        <permission name="android.permission.CONTROL_DEVICE_LIGHTS" />
+    </privapp-permissions>
+</permissions>
