@@ -224,7 +224,17 @@ private fun OneGlyphApp() {
     }
 
     var toyOn by remember {
-        mutableStateOf(false)
+        mutableStateOf(
+            context
+                .getSharedPreferences(
+                    "oneglyph_background",
+                    Context.MODE_PRIVATE
+                )
+                .getBoolean(
+                    "toy_enabled",
+                    false
+                )
+        )
     }
 
     val notificationPermission =
