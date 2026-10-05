@@ -626,6 +626,39 @@ private fun OneGlyphApp() {
     }
 }
 
+private fun hasAudioAccess(
+    context: Context
+): Boolean {
+    return context.checkSelfPermission(
+        Manifest.permission.RECORD_AUDIO
+    ) == PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasMediaAccess(
+    context: Context
+): Boolean {
+    val enabled =
+        Settings.Secure.getString(
+            context.contentResolver,
+            "enabled_notification_listeners"
+        ).orEmpty()
+
+    val target =
+        ComponentName(
+            context,
+            GlyphNotificationListenerService::class.java
+        )
+
+    return enabled
+        .split(":")
+        .mapNotNull {
+            ComponentName.unflattenFromString(it)
+        }
+        .any {
+            it == target
+        }
+}
+
 @Composable
 private fun Header() {
     Column(
