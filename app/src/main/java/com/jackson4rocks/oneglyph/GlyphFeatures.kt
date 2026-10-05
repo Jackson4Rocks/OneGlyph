@@ -208,6 +208,13 @@ class MediaPlaybackWatcher(
     private var currentController:
         android.media.session.MediaController? = null
 
+    private val ticker = object : Runnable {
+        override fun run() {
+            publish()
+            handler.postDelayed(this, 350L)
+        }
+    }
+
     private val callback =
         object : android.media.session.MediaController.Callback() {
             override fun onPlaybackStateChanged(
@@ -241,6 +248,7 @@ class MediaPlaybackWatcher(
                 handler
             )
             refresh()
+            handler.post(ticker)
         } catch (_: SecurityException) {
             onAccessError()
         } catch (_: Throwable) {
@@ -333,6 +341,7 @@ class MediaPlaybackWatcher(
     }
 
     override fun close() {
+        handler.removeCallbacks(ticker)
         currentController?.unregisterCallback(callback)
         currentController = null
 
