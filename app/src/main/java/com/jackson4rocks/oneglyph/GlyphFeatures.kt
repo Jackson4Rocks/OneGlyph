@@ -927,8 +927,7 @@ object CameraCountdown {
 
 private val chargingScope =
     CoroutineScope(
-        SupervisorJob() +
-            Dispatchers.IO
+        Dispatchers.IO
     )
 
 object ChargingMonitor {
