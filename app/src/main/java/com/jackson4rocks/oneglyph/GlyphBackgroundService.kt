@@ -208,7 +208,7 @@ class GlyphBackgroundService : Service() {
 
         return builder
             .setSmallIcon(
-                R.drawable.ic_oneglyph
+                R.drawable.ic_launcher_monochrome
             )
             .setContentTitle(
                 "OneGlyph"
@@ -224,8 +224,6 @@ class GlyphBackgroundService : Service() {
     }
 
     override fun onDestroy() {
-        saveToyState(false)
-
         try {
             controller.stopPattern()
             controller.close()
