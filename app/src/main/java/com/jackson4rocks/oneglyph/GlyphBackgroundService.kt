@@ -24,6 +24,9 @@ class GlyphBackgroundService : Service() {
         const val ACTION_TOY_OFF =
             "com.jackson4rocks.oneglyph.action.TOY_OFF"
 
+        const val ACTION_KEEP_ALIVE =
+            "com.jackson4rocks.oneglyph.action.KEEP_ALIVE"
+
         const val ACTION_STOP =
             "com.jackson4rocks.oneglyph.action.STOP"
 
@@ -47,11 +50,36 @@ class GlyphBackgroundService : Service() {
         }
 
         fun stopToy(context: Context) {
-            context.stopService(
+            start(
+                context,
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                )
+                ).setAction(ACTION_TOY_OFF)
+            )
+        }
+
+        fun ensureRunning(context: Context) {
+            if (!PatternStore(context).appEnabled()) {
+                return
+            }
+
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(ACTION_KEEP_ALIVE)
+            )
+        }
+
+        fun stopService(context: Context) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(ACTION_STOP)
             )
         }
 
@@ -82,6 +110,16 @@ class GlyphBackgroundService : Service() {
 
         createNotificationChannel()
 
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification()
+        )
+
+        if (!PatternStore(this).appEnabled()) {
+            stopSelf()
+            return
+        }
+
         controller =
             GlyphController(
                 applicationContext
@@ -95,11 +133,6 @@ class GlyphBackgroundService : Service() {
                 TOY_ENABLED,
                 false
             )
-
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification()
-        )
 
         if (toyRunning) {
             startToyLoop()
@@ -120,11 +153,27 @@ class GlyphBackgroundService : Service() {
             ACTION_TOY_OFF -> {
                 saveToyState(false)
                 stopToyLoop()
+            }
 
-                stopForeground(
-                    STOP_FOREGROUND_REMOVE
-                )
-                stopSelf()
+            ACTION_KEEP_ALIVE -> {
+                if (!PatternStore(this).appEnabled()) {
+                    stopForeground(
+                        STOP_FOREGROUND_REMOVE
+                    )
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                if (!::controller.isInitialized) {
+                    controller =
+                        GlyphController(
+                            applicationContext
+                        )
+                }
+
+                if (toyRunning) {
+                    startToyLoop()
+                }
             }
 
             ACTION_STOP -> {
@@ -175,7 +224,37 @@ class GlyphBackgroundService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private fun startToyLoop() {
+    override fun onTaskRemoved(
+        rootIntent: Intent?
+    ) {
+        if (PatternStore(this).appEnabled()) {
+            try {
+                val restart =
+                    Intent(
+                        applicationContext,
+                        GlyphBackgroundService::class.java
+                    ).setAction(
+                        ACTION_KEEP_ALIVE
+                    )
+
+                if (Build.VERSION.SDK_INT >= 26) {
+                    startForegroundService(restart)
+                } else {
+                    startService(restart)
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w(
+                    "OneGlyph",
+                    "Could not restart background service",
+                    e
+                )
+            }
+        }
+
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun startToyLoop {
         if (!toyRunning) {
             toyRunning = true
         }
@@ -216,12 +295,14 @@ class GlyphBackgroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "OneGlyph background effects",
+                "OneGlyph background",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description =
-                    "Keeps continuous OneGlyph effects running."
+                    "Keeps OneGlyph running in the background."
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
         )
     }
@@ -243,10 +324,7 @@ class GlyphBackgroundService : Service() {
                 R.drawable.ic_launcher_monochrome
             )
             .setContentTitle(
-                "OneGlyph"
-            )
-            .setContentText(
-                "Background Glyph effect is running."
+                "Keep Blinking!"
             )
             .setOngoing(true)
             .setCategory(
