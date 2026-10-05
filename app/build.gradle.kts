@@ -64,11 +64,11 @@ val bundleLeonProfile = tasks.register("bundleLeonProfile") {
         output.parentFile.mkdirs()
 
         val connection =
-            URI(
+            java.net.URI(
                 "https://github.com/Jackson4Rocks.png?size=256"
             )
                 .toURL()
-                .openConnection() as HttpURLConnection
+                .openConnection() as java.net.HttpURLConnection
 
         connection.connectTimeout = 10_000
         connection.readTimeout = 10_000
