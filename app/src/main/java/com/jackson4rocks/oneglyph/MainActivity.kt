@@ -5,7 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.provider.MediaStore
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,26 +24,31 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BorderStroke
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Divider
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -61,32 +66,60 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-private val Black = Color.Black
-private val Paper = Color(0xFFF4F4F4)
-private val Ink = Color(0xFF101010)
-private val Muted = Color(0xFF858585)
-private val Line = Color(0xFF2A2A2A)
 private val Red = Color(0xFFFF3B30)
-private val Panel = Color(0xFF0A0A0A)
 
-private val NDotFamily = runCatching {
-    FontFamily(
-        Font(
-            DeviceFontFamilyName("NDot55All")
-        )
+private val DarkScheme =
+    darkColorScheme(
+        background = Color.Black,
+        surface = Color(0xFF0A0A0A),
+        primary = Color.White,
+        onPrimary = Color.Black,
+        secondary = Color.White,
+        onSecondary = Color.Black,
+        onBackground = Color.White,
+        onSurface = Color.White,
+        outline = Color(0xFF303030),
+        error = Red
     )
-}.getOrElse {
-    FontFamily.Monospace
-}
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
+private val LightScheme =
+    lightColorScheme(
+        background = Color(0xFFF4F4F4),
+        surface = Color.White,
+        primary = Color.Black,
+        onPrimary = Color.White,
+        secondary = Color.Black,
+        onSecondary = Color.White,
+        onBackground = Color.Black,
+        onSurface = Color.Black,
+        outline = Color(0xFFBEBEBE),
+        error = Red
+    )
+
+private val NDotFamily =
+    runCatching {
+        FontFamily(
+            Font(
+                DeviceFontFamilyName(
+                    "NDot55All"
+                )
+            )
+        )
+    }.getOrElse {
+        FontFamily.Monospace
+    }
+
+class MainActivity :
+    ComponentActivity() {
+
+    override fun onCreate(
+        savedInstanceState: android.os.Bundle?
+    ) {
+        super.onCreate(
+            savedInstanceState
+        )
 
         setContent {
             OneGlyphApp()
@@ -97,63 +130,90 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun OneGlyphApp() {
     val context =
-        androidx.compose.ui.platform.LocalContext.current
-
-    val controller =
-        remember { GlyphController(context) }
+        androidx.compose.ui.platform
+            .LocalContext.current
 
     val store =
-        remember { PatternStore(context) }
+        remember {
+            PatternStore(context)
+        }
 
-    var page by remember { mutableStateOf("HOME") }
-    var brightness by remember {
-        mutableIntStateOf(3200)
-    }
-    var status by remember {
-        mutableStateOf("CONNECTING • STOCK GLYPH")
-    }
-    var connected by remember {
-        mutableStateOf(false)
+    val controller =
+        remember {
+            GlyphController(context)
+        }
+
+    var page by remember {
+        mutableStateOf("HOME")
     }
 
-    var composer by remember {
-        mutableStateOf(store.loadComposer())
+    var isDark by remember {
+        mutableStateOf(
+            store.theme() ==
+                OneGlyphTheme.DARK
+        )
+    }
+
+    var appEnabled by remember {
+        mutableStateOf(
+            store.appEnabled()
+        )
     }
 
     var beatSyncOn by remember {
         mutableStateOf(false)
     }
 
+    var connected by remember {
+        mutableStateOf(false)
+    }
+
+    var status by remember {
+        mutableStateOf("Ready.")
+    }
+
     var audioAccess by remember {
-        mutableStateOf(hasAudioAccess(context))
+        mutableStateOf(
+            hasAudioAccess(context)
+        )
     }
 
     var mediaAccess by remember {
-        mutableStateOf(hasMediaAccess(context))
+        mutableStateOf(
+            hasMediaAccess(context)
+        )
     }
 
     var playback by remember {
         mutableStateOf<MediaPlaybackInfo?>(null)
     }
 
-    var reminderOn by remember {
+    var brightness by remember {
+        mutableIntStateOf(3200)
+    }
+
+    var chargingEnabled by remember {
         mutableStateOf(
-            store.notificationRemindersEnabled()
+            store.chargingEnabled()
         )
     }
 
-    var reminderInterval by remember {
+    var chargeTarget by remember {
         mutableIntStateOf(
-            store.reminderIntervalMinutes()
+            store.chargeTarget()
         )
     }
 
-    var chargingOn by remember {
-        mutableStateOf(store.chargingEnabled())
+    var cameraSeconds by remember {
+        mutableIntStateOf(
+            store.cameraSeconds()
+        )
     }
 
-    var gameScore by remember {
-        mutableIntStateOf(0)
+    var composer by remember {
+        mutableStateOf(
+            store.loadComposer()
+        )
     }
 
     val audioPermission =
@@ -162,21 +222,20 @@ private fun OneGlyphApp() {
         ) { granted ->
             audioAccess = granted
 
-            if (granted && hasMediaAccess(context)) {
+            if (!granted) {
+                status =
+                    "Audio access is needed for Beat Sync."
+            } else if (
+                !hasMediaAccess(context)
+            ) {
+                status =
+                    "Allow Media Access next."
+                openMediaAccess(context)
+            } else {
                 mediaAccess = true
                 beatSyncOn = true
-                status = "Waiting for music…"
-            } else if (granted) {
                 status =
-                    "Allow Media Access so OneGlyph can follow your music."
-                context.startActivity(
-                    Intent(
-                        Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-                    )
-                )
-            } else {
-                status =
-                    "Audio access is needed for beat detection."
+                    "Waiting for music…"
             }
         }
 
@@ -187,231 +246,199 @@ private fun OneGlyphApp() {
                 controller,
                 onState = { info ->
                     playback = info
+
                     status =
                         when {
                             info == null ->
-                                "Play something to start Beat Sync."
+                                "Play music to start syncing."
 
                             info.isPlaying ->
                                 "Following the beat."
 
                             else ->
-                                "Paused — the Glyph is off."
+                                "Paused — Glyph is off."
                         }
                 },
                 onError = { message ->
-                    status = message
                     beatSyncOn = false
+                    status = message
                 }
             )
         }
 
-    val typography =
-        MaterialTheme.typography.copy(
-            displayLarge =
-                MaterialTheme.typography.displayLarge.copy(
-                    fontFamily = NDotFamily
-                ),
-            displayMedium =
-                MaterialTheme.typography.displayMedium.copy(
-                    fontFamily = NDotFamily
-                ),
-            displaySmall =
-                MaterialTheme.typography.displaySmall.copy(
-                    fontFamily = NDotFamily
-                ),
-            headlineLarge =
-                MaterialTheme.typography.headlineLarge.copy(
-                    fontFamily = NDotFamily
-                ),
-            headlineMedium =
-                MaterialTheme.typography.headlineMedium.copy(
-                    fontFamily = NDotFamily
-                ),
-            headlineSmall =
-                MaterialTheme.typography.headlineSmall.copy(
-                    fontFamily = NDotFamily
-                ),
-            titleLarge =
-                MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = NDotFamily
-                ),
-            titleMedium =
-                MaterialTheme.typography.titleMedium.copy(
-                    fontFamily = NDotFamily
-                ),
-            titleSmall =
-                MaterialTheme.typography.titleSmall.copy(
-                    fontFamily = NDotFamily
-                ),
-            bodyLarge =
-                MaterialTheme.typography.bodyLarge.copy(
-                    fontFamily = NDotFamily
-                ),
-            bodyMedium =
-                MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = NDotFamily
-                ),
-            bodySmall =
-                MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = NDotFamily
-                ),
-            labelLarge =
-                MaterialTheme.typography.labelLarge.copy(
-                    fontFamily = NDotFamily
-                ),
-            labelMedium =
-                MaterialTheme.typography.labelMedium.copy(
-                    fontFamily = NDotFamily
-                ),
-            labelSmall =
-                MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = NDotFamily
-                )
-        )
+    DisposableEffect(
+        controller,
+        beatSync
+    ) {
+        controller.setStatusListener {
+            connected =
+                controller.isReady()
+        }
+
+        onDispose {
+            controller.setStatusListener(
+                null
+            )
+            beatSync.close()
+            controller.close()
+        }
+    }
+
+    LaunchedEffect(appEnabled) {
+        if (!appEnabled) {
+            beatSyncOn = false
+            beatSync.close()
+            playback = null
+            controller.stopPattern()
+        }
+    }
+
+    LaunchedEffect(
+        beatSyncOn,
+        appEnabled
+    ) {
+        if (
+            beatSyncOn &&
+            appEnabled
+        ) {
+            beatSync.start()
+        } else {
+            beatSync.close()
+            playback = null
+            controller.stopPattern()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            connected =
+                controller.isReady()
+
+            audioAccess =
+                hasAudioAccess(context)
+
+            mediaAccess =
+                hasMediaAccess(context)
+
+            if (
+                beatSyncOn &&
+                appEnabled
+            ) {
+                beatSync.refresh()
+            }
+
+            delay(1000L)
+        }
+    }
 
     MaterialTheme(
-        colorScheme = androidx.compose.material3.darkColorScheme(
-            background = Black,
-            surface = Panel,
-            primary = Paper,
-            onPrimary = Ink,
-            secondary = Paper,
-            onSecondary = Ink,
-            onBackground = Paper,
-            onSurface = Paper
-        ),
-        typography = typography
-    ) {
-        DisposableEffect(beatSync) {
-            controller.setStatusListener { message ->
-                if (!beatSyncOn) {
-                    status = message
-                }
-                connected = controller.isReady()
-            }
-
-            onDispose {
-                controller.setStatusListener(null)
-                beatSync.close()
-                controller.close()
-            }
-        }
-
-        LaunchedEffect(beatSyncOn) {
-            if (beatSyncOn) {
-                beatSync.start()
+        colorScheme =
+            if (isDark) {
+                DarkScheme
             } else {
-                beatSync.close()
-                playback = null
-                controller.stopPattern()
-            }
-        }
-
-        LaunchedEffect(Unit) {
-            while (true) {
-                connected = controller.isReady()
-                audioAccess = hasAudioAccess(context)
-                mediaAccess = hasMediaAccess(context)
-
-                if (beatSyncOn) {
-                    beatSync.refresh()
-                }
-
-                delay(900L)
-            }
-        }
+                LightScheme
+            },
+        typography =
+            MaterialTheme.typography.copy(
+                displayLarge =
+                    MaterialTheme.typography.displayLarge
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        ),
+                titleLarge =
+                    MaterialTheme.typography.titleLarge
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        ),
+                titleMedium =
+                    MaterialTheme.typography.titleMedium
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        ),
+                bodyLarge =
+                    MaterialTheme.typography.bodyLarge
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        ),
+                bodyMedium =
+                    MaterialTheme.typography.bodyMedium
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        ),
+                bodySmall =
+                    MaterialTheme.typography.bodySmall
+                        .copy(
+                            fontFamily =
+                                NDotFamily
+                        )
+            )
+    ) {
+        val colors =
+            MaterialTheme.colorScheme
 
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Black)
-                .statusBarsPadding()
-                .navigationBarsPadding(),
-            color = Black
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            color =
+                colors.background
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(
-                        rememberScrollState()
-                    )
-                    .padding(
-                        horizontal = 18.dp,
-                        vertical = 14.dp
-                    ),
-                verticalArrangement =
-                    Arrangement.spacedBy(14.dp)
-            ) {
-                Header()
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(
-                            1.dp,
-                            Line,
-                            RoundedCornerShape(4.dp)
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(
+                            rememberScrollState()
                         )
-                        .padding(4.dp),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(4.dp)
-                ) {
-                    listOf(
-                        "HOME",
-                        "COMPOSER",
-                        "MORE"
-                    ).forEach { item ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(
-                                    if (page == item) {
-                                        Paper
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    RoundedCornerShape(3.dp)
-                                )
-                                .clickable {
-                                    page = item
-                                }
-                                .padding(
-                                    vertical = 10.dp
-                                ),
-                            contentAlignment =
-                                Alignment.Center
-                        ) {
-                            Text(
-                                item,
-                                fontFamily = NDotFamily,
-                                fontSize = 11.sp,
-                                color =
-                                    if (page == item) {
-                                        Ink
-                                    } else {
-                                        Muted
-                                    }
-                            )
-                        }
+                        .padding(
+                            horizontal = 18.dp,
+                            vertical = 14.dp
+                        ),
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        14.dp
+                    )
+            ) {
+                Header(
+                    enabled = appEnabled,
+                    connected = connected
+                )
+
+                TopNavigation(
+                    page = page,
+                    onPage = {
+                        page = it
                     }
-                }
+                )
 
                 when (page) {
                     "HOME" -> {
                         HomePage(
                             context = context,
                             controller = controller,
+                            enabled = appEnabled,
+                            connected = connected,
                             beatSyncOn = beatSyncOn,
                             audioAccess = audioAccess,
                             mediaAccess = mediaAccess,
                             playback = playback,
                             brightness = brightness,
+                            cameraSeconds = cameraSeconds,
                             onBrightness = {
                                 brightness = it
                             },
-                            onToggleBeatSync = {
-                                if (beatSyncOn) {
+                            onBeatSync = {
+                                if (!appEnabled) {
+                                    status =
+                                        "Turn on OneGlyph in Settings first."
+                                } else if (beatSyncOn) {
                                     beatSyncOn = false
                                     status =
                                         "Beat Sync is off."
@@ -421,11 +448,9 @@ private fun OneGlyphApp() {
                                     )
                                 } else if (!mediaAccess) {
                                     status =
-                                        "Allow Media Access so OneGlyph can follow what is playing."
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-                                        )
+                                        "Allow Media Access first."
+                                    openMediaAccess(
+                                        context
                                     )
                                 } else {
                                     beatSyncOn = true
@@ -433,39 +458,55 @@ private fun OneGlyphApp() {
                                         "Waiting for music…"
                                 }
                             },
-                            onOpenMediaAccess = {
-                                context.startActivity(
-                                    Intent(
-                                        Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-                                    )
+                            onMediaAccess = {
+                                openMediaAccess(
+                                    context
                                 )
                             },
-                            onPattern = { pattern, name ->
-                                controller.playPattern(
-                                    pattern,
-                                    2
-                                )
-                                status =
-                                    "Playing " + name + "."
+                            onBlink = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    controller.playPattern(it)
+                                    status =
+                                        "Playing pattern."
+                                }
                             },
                             onStop = {
                                 controller.stopPattern()
                                 status =
                                     "Glyph stopped."
+                            },
+                            onCamera = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    CameraCountdown.start(
+                                        context,
+                                        controller,
+                                        cameraSeconds
+                                    )
+                                    status =
+                                        "Camera countdown started."
+                                }
                             }
                         )
                     }
 
                     "COMPOSER" -> {
                         ComposerPage(
-                            context = context,
                             controller = controller,
+                            enabled = appEnabled,
+                            connected = connected,
                             steps = composer,
                             onSteps = {
                                 composer =
                                     it.toMutableList()
-
-                                store.saveComposer(it)
+                                store.saveComposer(
+                                    it
+                                )
                             },
                             onStatus = {
                                 status = it
@@ -473,153 +514,64 @@ private fun OneGlyphApp() {
                         )
                     }
 
-                    "MORE" -> {
-                        ModesPage(
+                    else -> {
+                        SettingsPage(
                             context = context,
-                            visualizerOn = beatSyncOn,
-                            reminderOn = reminderOn,
-                            reminderInterval =
-                                reminderInterval,
-                            chargingOn = chargingOn,
-                            gameScore = gameScore,
-                            onVisualizer = {
-                                if (beatSyncOn) {
+                            appEnabled = appEnabled,
+                            dark = isDark,
+                            chargingEnabled =
+                                chargingEnabled,
+                            chargeTarget =
+                                chargeTarget,
+                            cameraSeconds =
+                                cameraSeconds,
+                            onAppEnabled = {
+                                appEnabled = it
+                                store.setAppEnabled(it)
+
+                                if (!it) {
                                     beatSyncOn = false
-                                } else if (!audioAccess) {
-                                    audioPermission.launch(
-                                        Manifest.permission.RECORD_AUDIO
-                                    )
-                                } else if (!mediaAccess) {
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-                                        )
-                                    )
+                                    controller.stopPattern()
                                     status =
-                                        "Allow Media Access first."
+                                        "OneGlyph is off."
                                 } else {
-                                    beatSyncOn = true
                                     status =
-                                        "Waiting for music…"
+                                        "OneGlyph is on."
                                 }
                             },
-                            onReminder = {
-                                reminderOn =
-                                    !reminderOn
-
-                                store
-                                    .setNotificationRemindersEnabled(
-                                        reminderOn
-                                    )
-
-                                status =
-                                    if (reminderOn) {
-                                        "REMINDERS ENABLED"
+                            onDarkMode = {
+                                isDark = it
+                                store.setTheme(
+                                    if (it) {
+                                        OneGlyphTheme.DARK
                                     } else {
-                                        "REMINDERS DISABLED"
+                                        OneGlyphTheme.LIGHT
                                     }
                             },
-                            onInterval = {
-                                reminderInterval = it
-                                store.setReminderIntervalMinutes(it)
-                                status =
-                                    "REMINDER INTERVAL • " +
-                                        it +
-                                        " MIN"
+                            onChargingEnabled = {
+                                chargingEnabled = it
+                                store.setChargingEnabled(it)
                             },
-                            onCharging = {
-                                chargingOn = !chargingOn
-                                store.setChargingEnabled(
-                                    chargingOn
-                                )
-
-                                status =
-                                    if (chargingOn) {
-                                        "CHARGING EFFECT ENABLED"
-                                    } else {
-                                        "CHARGING EFFECT DISABLED"
-                                    }
+                            onChargeTarget = {
+                                chargeTarget = it
+                                store.setChargeTarget(it)
                             },
-                            onCamera = {
-                                try {
-                                    context.startActivity(
-                                        Intent(
-                                            MediaStore
-                                                .INTENT_ACTION_STILL_IMAGE_CAMERA
-                                        )
-                                    )
-
-                                    CoroutineScope(
-                                        Dispatchers.IO
-                                    ).launch {
-                                        delay(500L)
-                                        GlyphAction.playOnce(
-                                            context,
-                                            GlyphPatterns
-                                                .cameraCountdown
-                                        )
-                                    }
-
-                                    status =
-                                        "CAMERA COUNTDOWN STARTED"
-                                } catch (_: Exception) {
-                                    status =
-                                        "NO CAMERA APP FOUND"
-                                }
-                            },
-                            onRingtone = {
-                                GlyphAction
-                                    .playRingtoneAndPattern(
-                                        context,
-                                        composer
-                                    )
-
-                                status =
-                                    "RINGTONE + COMPOSER PLAYING"
-                            },
-                            onGame = {
-                                gameScore += 1
-
-                                CoroutineScope(
-                                    Dispatchers.IO
-                                ).launch {
-                                    GlyphAction.playOnce(
-                                        context,
-                                        if (gameScore % 3 == 0) {
-                                            GlyphPatterns.heartbeat
-                                        } else {
-                                            GlyphPatterns.double
-                                        }
-                                    )
-                                }
-
-                                status =
-                                    "DOT TOY • SCORE " +
-                                        gameScore
-                            },
-                            onStatus = {
-                                status = it
+                            onCameraSeconds = {
+                                cameraSeconds = it
+                                store.setCameraSeconds(it)
                             }
                         )
                     }
                 }
 
-                Divider(color = Line)
-
                 Text(
                     status,
                     fontFamily = NDotFamily,
                     fontSize = 10.sp,
-                    letterSpacing = .6.sp,
-                    color = Muted
-                )
-
-                Text(
-                    "ONEGLYPH • ONE DOT • JUST PRESS PLAY.",
-                    fontFamily = NDotFamily,
-                    fontSize = 9.sp,
-                    letterSpacing = .8.sp,
-                    color = Color(0xFF595959)
+                    color =
+                        colors.onBackground.copy(
+                            alpha = 0.55f
+                        )
                 )
             }
         }
@@ -628,11 +580,11 @@ private fun OneGlyphApp() {
 
 private fun hasAudioAccess(
     context: Context
-): Boolean {
-    return context.checkSelfPermission(
+): Boolean =
+    context.checkSelfPermission(
         Manifest.permission.RECORD_AUDIO
-    ) == PackageManager.PERMISSION_GRANTED
-}
+    ) ==
+        PackageManager.PERMISSION_GRANTED
 
 private fun hasMediaAccess(
     context: Context
@@ -643,44 +595,198 @@ private fun hasMediaAccess(
             "enabled_notification_listeners"
         ).orEmpty()
 
-    val target =
+    val component =
         ComponentName(
             context,
-            GlyphNotificationListenerService::class.java
+            GlyphMediaSessionService::class.java
         )
 
     return enabled
         .split(":")
         .mapNotNull {
-            ComponentName.unflattenFromString(it)
+            ComponentName
+                .unflattenFromString(it)
         }
         .any {
-            it == target
+            it == component
         }
 }
 
-@Composable
-private fun Header() {
-    Column(
-        verticalArrangement =
-            Arrangement.spacedBy(3.dp)
-    ) {
-        Text(
-            "ONEGLYPH",
-            fontFamily = NDotFamily,
-            fontSize = 34.sp,
-            fontWeight = FontWeight.Normal,
-            letterSpacing = (-1).sp,
-            color = Paper
+private fun openMediaAccess(
+    context: Context
+) {
+    context.startActivity(
+        Intent(
+            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
         )
+    )
+}
 
-        Text(
-            "MAKE THE ONE DOT DO MORE.",
-            fontFamily = NDotFamily,
-            fontSize = 10.sp,
-            letterSpacing = 1.3.sp,
-            color = Muted
-        )
+@Composable
+private fun Header(
+    enabled: Boolean,
+    connected: Boolean
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    Row(
+        modifier =
+            Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.SpaceBetween,
+        verticalAlignment =
+            Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                "ONEGLYPH",
+                fontFamily =
+                    NDotFamily,
+                fontSize = 32.sp,
+                letterSpacing =
+                    (-1).sp,
+                color =
+                    colors.onBackground
+            )
+
+            Text(
+                "MAKE THE ONE DOT DO MORE.",
+                fontFamily =
+                    NDotFamily,
+                fontSize = 9.sp,
+                letterSpacing =
+                    1.1.sp,
+                color =
+                    colors.onBackground.copy(
+                        alpha = 0.55f
+                    )
+            )
+        }
+
+        Row(
+            modifier =
+                Modifier
+                    .border(
+                        1.dp,
+                        colors.outline,
+                        RoundedCornerShape(6.dp)
+                    )
+                    .padding(
+                        horizontal = 9.dp,
+                        vertical = 6.dp
+                    ),
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            Box(
+                modifier =
+                    Modifier
+                        .size(7.dp)
+                        .background(
+                            when {
+                                !enabled ->
+                                    colors.outline
+
+                                connected ->
+                                    Red
+
+                                else ->
+                                    colors.outline
+                            },
+                            CircleShape
+                        )
+            )
+
+            Text(
+                when {
+                    !enabled -> "  OFF"
+                    connected -> "  READY"
+                    else -> "  LINKING"
+                },
+                fontFamily =
+                    NDotFamily,
+                fontSize = 9.sp,
+                letterSpacing =
+                    .8.sp,
+                color =
+                    colors.onBackground
+            )
+        }
+    }
+}
+
+@Composable
+private fun TopNavigation(
+    page: String,
+    onPage: (String) -> Unit
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    colors.outline,
+                    RoundedCornerShape(6.dp)
+                )
+                .padding(4.dp),
+        horizontalArrangement =
+            Arrangement.spacedBy(4.dp)
+    ) {
+        listOf(
+            "HOME" to "Home",
+            "COMPOSER" to "Composer",
+            "SETTINGS" to "Settings"
+        ).forEach { item ->
+            Box(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .background(
+                            if (
+                                page ==
+                                    item.first
+                            ) {
+                                colors.primary
+                            } else {
+                                Color.Transparent
+                            },
+                            RoundedCornerShape(4.dp)
+                        )
+                        .clickable {
+                            onPage(
+                                item.first
+                            )
+                        }
+                        .padding(
+                            vertical = 10.dp
+                        ),
+                contentAlignment =
+                    Alignment.Center
+            ) {
+                Text(
+                    item.second,
+                    fontFamily =
+                        NDotFamily,
+                    fontSize = 10.sp,
+                    color =
+                        if (
+                            page ==
+                                item.first
+                        ) {
+                            colors.onPrimary
+                        } else {
+                            colors.onBackground.copy(
+                                alpha = .6f
+                            )
+                        }
+                )
+            }
+        }
     }
 }
 
@@ -688,55 +794,96 @@ private fun Header() {
 private fun HomePage(
     context: Context,
     controller: GlyphController,
+    enabled: Boolean,
+    connected: Boolean,
     beatSyncOn: Boolean,
     audioAccess: Boolean,
     mediaAccess: Boolean,
     playback: MediaPlaybackInfo?,
     brightness: Int,
+    cameraSeconds: Int,
     onBrightness: (Int) -> Unit,
-    onToggleBeatSync: () -> Unit,
-    onOpenMediaAccess: () -> Unit,
-    onPattern: (List<GlyphStep>, String) -> Unit,
-    onStop: () -> Unit
+    onBeatSync: () -> Unit,
+    onMediaAccess: () -> Unit,
+    onBlink: (List<GlyphStep>) -> Unit,
+    onStop: () -> Unit,
+    onCamera: () -> Unit
 ) {
+    val colors =
+        MaterialTheme.colorScheme
+
     UserCard {
         Text(
             "MUSIC",
-            fontFamily = NDotFamily,
-            fontSize = 11.sp,
-            color = Muted
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
         )
 
         Text(
             when {
                 playback?.isPlaying == true ->
                     "The dot is dancing."
+
                 playback != null ->
                     "Music paused."
+
                 else ->
-                    "Make your music move the dot."
+                    "Play something."
             },
-            fontFamily = NDotFamily,
-            fontSize = 23.sp,
-            color = Paper
+            fontFamily =
+                NDotFamily,
+            fontSize = 22.sp,
+            color =
+                colors.onSurface
         )
 
         if (playback != null) {
             Text(
-                playback.title.ifBlank { "Now playing" },
-                fontFamily = NDotFamily,
+                playback.title
+                    .ifBlank {
+                        "Now playing"
+                    },
+                fontFamily =
+                    NDotFamily,
                 fontSize = 14.sp,
-                color = Paper
+                color =
+                    colors.onSurface
             )
 
             Text(
-                playback.artist.ifBlank {
-                    "Media player"
-                },
-                fontFamily = NDotFamily,
+                playback.artist
+                    .ifBlank {
+                        "Media player"
+                    },
+                fontFamily =
+                    NDotFamily,
                 fontSize = 10.sp,
-                color = Muted
+                color =
+                    colors.onSurface.copy(
+                        alpha = .55f
+                    )
             )
+
+            if (playback.durationMs > 0) {
+                val progress =
+                    (
+                        playback.positionMs.toFloat() /
+                            playback.durationMs.toFloat()
+                    ).coerceIn(0f, 1f)
+
+                LinearProgressIndicator(
+                    progress = {
+                        progress
+                    },
+                    modifier =
+                        Modifier.fillMaxWidth()
+                )
+            }
         }
 
         PrimaryButton(
@@ -746,147 +893,759 @@ private fun HomePage(
                 } else {
                     "TURN ON BEAT SYNC"
                 },
-            onClick = onToggleBeatSync
+            enabled =
+                enabled,
+            onClick =
+                onBeatSync
         )
 
         if (!audioAccess) {
-            Text(
-                "Audio access lets OneGlyph hear the phone's playing audio for beat timing.",
-                fontFamily = NDotFamily,
-                fontSize = 9.sp,
-                color = Muted
+            SmallNote(
+                "Beat Sync needs Audio access so it can analyze the music."
             )
         }
 
         if (!mediaAccess) {
             OutlinedAction(
                 "ALLOW MEDIA ACCESS",
-                onClick = onOpenMediaAccess
+                onClick =
+                    onMediaAccess
             )
         }
 
-        Text(
+        SmallNote(
             when {
                 playback?.isPlaying == true ->
-                    "Drums, kicks and other strong rhythm hits become short Glyph flashes."
+                    "Drums, kicks and strong rhythm hits make the dot blink."
+
                 playback != null ->
-                    "Paused means the Glyph stays off."
+                    "When music pauses, the Glyph turns off."
+
                 else ->
-                    "Play music from any Android media app, then turn Beat Sync on."
-            },
-            fontFamily = NDotFamily,
-            fontSize = 10.sp,
-            color = Muted
+                    "OneGlyph follows the media Android says is currently playing."
+            }
         )
     }
 
     UserCard {
         Text(
-            "QUICK BLINKS",
-            fontFamily = NDotFamily,
-            fontSize = 11.sp,
-            color = Muted
+            "BLINK",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
         )
 
         Row(
             horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
+                Arrangement.spacedBy(
+                    8.dp
+                )
         ) {
             QuickButton(
                 "Blink",
-                Modifier.weight(1f)
+                Modifier.weight(1f),
+                enabled && connected
             ) {
-                onPattern(
-                    GlyphPatterns.single,
-                    "a blink"
+                onBlink(
+                    GlyphPatterns.blink
                 )
             }
 
             QuickButton(
                 "Double",
-                Modifier.weight(1f)
+                Modifier.weight(1f),
+                enabled && connected
             ) {
-                onPattern(
-                    GlyphPatterns.double,
-                    "a double blink"
+                onBlink(
+                    GlyphPatterns.doubleBlink
                 )
             }
 
             QuickButton(
                 "Heart",
-                Modifier.weight(1f)
+                Modifier.weight(1f),
+                enabled && connected
             ) {
-                onPattern(
-                    GlyphPatterns.heartbeat,
-                    "a heartbeat"
+                onBlink(
+                    GlyphPatterns.heartbeat
                 )
             }
         }
 
         OutlinedAction(
             "STOP GLYPH",
-            onClick = onStop
+            enabled &&
+                connected,
+            onClick =
+                onStop
         )
     }
 
     UserCard {
         Text(
-            "BRIGHTNESS",
-            fontFamily = NDotFamily,
+            "CAMERA",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Slow flashes become faster as the timer gets close to zero.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 15.sp,
+            color =
+                colors.onSurface
+        )
+
+        Text(
+            "${cameraSeconds} seconds",
+            fontFamily =
+                NDotFamily,
             fontSize = 11.sp,
-            color = Muted
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        PrimaryButton(
+            text =
+                "START CAMERA COUNTDOWN",
+            enabled =
+                enabled &&
+                    connected,
+            onClick =
+                onCamera
+        )
+    }
+
+    UserCard {
+        Text(
+            "MANUAL CONTROL",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
         )
 
         Text(
             brightness.toString(),
-            fontFamily = NDotFamily,
-            fontSize = 34.sp,
-            color = Paper
+            fontFamily =
+                NDotFamily,
+            fontSize = 32.sp,
+            color =
+                colors.onSurface
         )
 
         Slider(
-            value = brightness.toFloat(),
+            value =
+                brightness.toFloat(),
             onValueChange = {
-                onBrightness(it.toInt())
+                onBrightness(
+                    it.toInt()
+                )
             },
-            valueRange = 0f..4095f
+            valueRange =
+                0f..4095f,
+            enabled =
+                enabled &&
+                    connected
         )
 
         OutlinedAction(
-            "TEST BRIGHTNESS"
-        ) {
-            controller.playPattern(
-                listOf(
-                    GlyphStep(
-                        brightness,
-                        250
-                    ),
-                    GlyphStep(
-                        0,
-                        250
+            "TEST BLINK",
+            enabled =
+                enabled &&
+                    connected,
+            onClick = {
+                controller.playPattern(
+                    listOf(
+                        GlyphStep(
+                            brightness,
+                            220
+                        ),
+                        GlyphStep(
+                            0,
+                            220
+                        )
                     )
                 )
+            }
+        )
+    }
+}
+
+@Composable
+private fun ComposerPage(
+    controller: GlyphController,
+    enabled: Boolean,
+    connected: Boolean,
+    steps: MutableList<GlyphStep>,
+    onSteps: (List<GlyphStep>) -> Unit,
+    onStatus: (String) -> Unit
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    UserCard {
+        Text(
+            "GLYPH COMPOSER",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Make your own blink pattern.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 21.sp,
+            color =
+                colors.onSurface
+        )
+
+        steps.forEachIndexed { index, step ->
+            Column(
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        5.dp
+                    )
+            ) {
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "BLINK ${index + 1}",
+                        fontFamily =
+                            NDotFamily,
+                        fontSize = 9.sp,
+                        color =
+                            colors.onSurface.copy(
+                                alpha = .55f
+                            )
+                    )
+
+                    Text(
+                        "${step.durationMs} ms",
+                        fontFamily =
+                            NDotFamily,
+                        fontSize = 9.sp,
+                        color =
+                            colors.onSurface
+                    )
+                }
+
+                Slider(
+                    value =
+                        step.brightness
+                            .toFloat(),
+                    onValueChange = {
+                        val next =
+                            steps.toMutableList()
+
+                        next[index] =
+                            step.copy(
+                                brightness =
+                                    it.toInt()
+                            )
+
+                        onSteps(
+                            next
+                        )
+                    },
+                    valueRange =
+                        0f..4095f,
+                    enabled =
+                        enabled &&
+                            connected
+                )
+
+                Row(
+                    horizontalArrangement =
+                        Arrangement.spacedBy(
+                            6.dp
+                        )
+                ) {
+                    listOf(
+                        100L,
+                        180L,
+                        300L,
+                        500L
+                    ).forEach { duration ->
+                        FilterChip(
+                            selected =
+                                step.durationMs ==
+                                    duration,
+                            onClick = {
+                                val next =
+                                    steps.toMutableList()
+
+                                next[index] =
+                                    step.copy(
+                                        durationMs =
+                                            duration
+                                    )
+
+                                onSteps(
+                                    next
+                                )
+                            },
+                            enabled =
+                                enabled &&
+                                    connected,
+                            label = {
+                                Text(
+                                    "${duration} ms",
+                                    fontSize = 8.sp
+                                )
+                            }
+                        )
+                    }
+                }
+
+                if (
+                    steps.size > 1
+                ) {
+                    TextButton(
+                        enabled =
+                            enabled &&
+                                connected,
+                        onClick = {
+                            val next =
+                                steps.toMutableList()
+
+                            next.removeAt(
+                                index
+                            )
+
+                            onSteps(
+                                next
+                            )
+                        }
+                    ) {
+                        Text(
+                            "Remove",
+                            color =
+                                colors.error
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(
+                color =
+                    colors.outline.copy(
+                        alpha = .6f
+                    )
             )
         }
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    8.dp
+                )
+        ) {
+            PrimaryButton(
+                text = "ADD BLINK",
+                modifier =
+                    Modifier.weight(1f),
+                enabled =
+                    enabled &&
+                        connected &&
+                        steps.size < 8,
+                onClick = {
+                    onSteps(
+                        steps +
+                            GlyphStep(
+                                4095,
+                                180
+                            )
+                    )
+                }
+            )
+
+            PrimaryButton(
+                text = "PLAY",
+                modifier =
+                    Modifier.weight(1f),
+                enabled =
+                    enabled &&
+                        connected,
+                onClick = {
+                    controller.playPattern(
+                        steps,
+                        2
+                    )
+                    onStatus(
+                        "Playing your pattern."
+                    )
+                }
+            )
+        }
+
+        OutlinedAction(
+            "SAVE",
+            enabled = enabled,
+            onClick = {
+                onSteps(
+                    steps
+                )
+                onStatus(
+                    "Pattern saved."
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsPage(
+    context: Context,
+    appEnabled: Boolean,
+    dark: Boolean,
+    chargingEnabled: Boolean,
+    chargeTarget: Int,
+    cameraSeconds: Int,
+    onAppEnabled: (Boolean) -> Unit,
+    onDarkMode: (Boolean) -> Unit,
+    onChargingEnabled: (Boolean) -> Unit,
+    onChargeTarget: (Int) -> Unit,
+    onCameraSeconds: (Int) -> Unit
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    UserCard {
+        SettingRow(
+            title = "OneGlyph",
+            description =
+                "Turn off all Glyph effects from the app.",
+            control = {
+                Switch(
+                    checked =
+                        appEnabled,
+                    onCheckedChange =
+                        onAppEnabled
+                )
+            }
+        )
+    }
+
+    UserCard {
+        Text(
+            "APPEARANCE",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    8.dp
+                )
+        ) {
+            FilterChip(
+                selected =
+                    dark,
+                onClick = {
+                    onDarkMode(true)
+                },
+                label = {
+                    Text("Dark")
+                }
+            )
+
+            FilterChip(
+                selected =
+                    !dark,
+                onClick = {
+                    onDarkMode(false)
+                },
+                label = {
+                    Text("Light")
+                }
+            )
+        }
+    }
+
+    UserCard {
+        SettingRow(
+            title =
+                "Charging effects",
+            description =
+                "Blink 4 times when charging starts.",
+            control = {
+                Switch(
+                    checked =
+                        chargingEnabled,
+                    onCheckedChange =
+                        onChargingEnabled
+                )
+            }
+        )
+
+        Text(
+            "Blink again when the battery reaches:",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    8.dp
+                )
+        ) {
+            listOf(
+                80,
+                90,
+                100
+            ).forEach { percent ->
+                FilterChip(
+                    selected =
+                        chargeTarget ==
+                            percent,
+                    onClick = {
+                        onChargeTarget(
+                            percent
+                        )
+                    },
+                    label = {
+                        Text(
+                            "${percent}%"
+                        )
+                    }
+                )
+            }
+        }
+
+        SmallNote(
+            "Set this to your phone's charging limit."
+        )
+
+        SmallNote(
+            "At the selected level, the Glyph blinks 9 times."
+        )
+    }
+
+    UserCard {
+        Text(
+            "CAMERA TIMER",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    8.dp
+                )
+        ) {
+            listOf(
+                3,
+                5,
+                10
+            ).forEach { seconds ->
+                FilterChip(
+                    selected =
+                        cameraSeconds ==
+                            seconds,
+                    onClick = {
+                        onCameraSeconds(
+                            seconds
+                        )
+                    },
+                    label = {
+                        Text(
+                            "${seconds}s"
+                        )
+                    }
+                )
+            }
+        }
+    }
+
+    UserCard {
+        Text(
+            "MEDIA ACCESS",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "OneGlyph uses Media Access to know what Android says is playing and whether it is paused.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface
+        )
+
+        OutlinedAction(
+            "OPEN MEDIA ACCESS",
+            onClick = {
+                openMediaAccess(
+                    context
+                )
+            }
+        )
+    }
+
+    UserCard {
+        Text(
+            "PROJECT MAINTAINER",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Leon",
+            fontFamily =
+                NDotFamily,
+            fontSize = 20.sp,
+            color =
+                colors.onSurface
+        )
+
+        SmallNote(
+            "OneGlyph is an independent community project."
+        )
+
+        OutlinedAction(
+            "OPEN PROJECT",
+            onClick = {
+                context.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(
+                            "https://github.com/Jackson4Rocks/OneGlyph"
+                        )
+                    )
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingRow(
+    title: String,
+    description: String,
+    control: @Composable () -> Unit
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    Row(
+        modifier =
+            Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.SpaceBetween,
+        verticalAlignment =
+            Alignment.CenterVertically
+    ) {
+        Column(
+            modifier =
+                Modifier.weight(1f),
+            verticalArrangement =
+                Arrangement.spacedBy(
+                    4.dp
+                )
+        ) {
+            Text(
+                title,
+                fontFamily =
+                    NDotFamily,
+                fontSize = 15.sp,
+                color =
+                    colors.onSurface
+            )
+
+            Text(
+                description,
+                fontFamily =
+                    NDotFamily,
+                fontSize = 9.sp,
+                color =
+                    colors.onSurface.copy(
+                        alpha = .55f
+                    )
+            )
+        }
+
+        control()
     }
 }
 
 @Composable
 private fun UserCard(
-    content: @Composable ColumnScope.() -> Unit
+    content:
+        @Composable
+        ColumnScope.() -> Unit
 ) {
+    val colors =
+        MaterialTheme.colorScheme
+
     Card(
         colors =
             CardDefaults.cardColors(
-                containerColor = Panel
+                containerColor =
+                    colors.surface
             ),
         border =
             BorderStroke(
                 1.dp,
-                Line
+                colors.outline
             ),
         shape =
-            RoundedCornerShape(12.dp)
+            RoundedCornerShape(
+                12.dp
+            )
     ) {
         Column(
             modifier =
@@ -894,8 +1653,11 @@ private fun UserCard(
                     .fillMaxWidth()
                     .padding(16.dp),
             verticalArrangement =
-                Arrangement.spacedBy(10.dp),
-            content = content
+                Arrangement.spacedBy(
+                    10.dp
+                ),
+            content =
+                content
         )
     }
 }
@@ -904,23 +1666,41 @@ private fun UserCard(
 private fun PrimaryButton(
     text: String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val colors =
+        MaterialTheme.colorScheme
+
     Button(
         modifier =
             modifier.fillMaxWidth(),
-        onClick = onClick,
+        enabled =
+            enabled,
+        onClick =
+            onClick,
         shape =
             RoundedCornerShape(6.dp),
         colors =
             ButtonDefaults.buttonColors(
-                containerColor = Paper,
-                contentColor = Ink
+                containerColor =
+                    colors.primary,
+                contentColor =
+                    colors.onPrimary,
+                disabledContainerColor =
+                    colors.surface.copy(
+                        alpha = .65f
+                    ),
+                disabledContentColor =
+                    colors.onSurface.copy(
+                        alpha = .35f
+                    )
             )
     ) {
         Text(
             text,
-            fontFamily = NDotFamily,
+            fontFamily =
+                NDotFamily,
             fontSize = 10.sp,
             letterSpacing = .7.sp
         )
@@ -931,650 +1711,34 @@ private fun PrimaryButton(
 private fun QuickButton(
     text: String,
     modifier: Modifier,
+    enabled: Boolean,
     onClick: () -> Unit
 ) {
+    val colors =
+        MaterialTheme.colorScheme
+
     OutlinedButton(
-        modifier = modifier,
-        onClick = onClick,
+        modifier =
+            modifier,
+        enabled =
+            enabled,
+        onClick =
+            onClick,
         shape =
-            RoundedCornerShape(6.dp),
+            RoundedCornerShape(
+                6.dp
+            ),
         border =
             BorderStroke(
                 1.dp,
-                Color(0xFF4A4A4A)
+                colors.outline
             )
     ) {
         Text(
             text,
-            fontFamily = NDotFamily,
+            fontFamily =
+                NDotFamily,
             fontSize = 9.sp
-        )
-    }
-}
-
-@Composable
-private fun DotPage(
-    controller: GlyphController,
-    connected: Boolean,
-    brightness: Int,
-    onBrightness: (Int) -> Unit,
-    onStatus: (String) -> Unit
-) {
-    SectionTitle(
-        "DOT CONTROL",
-        "ONE CHANNEL. MANY PERSONALITIES."
-    )
-
-    DataCard {
-        Text(
-            "INTENSITY",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        Text(
-            brightness
-                .toString()
-                .padStart(4, '0'),
-            fontSize = 42.sp,
-            color = Paper
-        )
-
-        Slider(
-            value = brightness.toFloat(),
-            onValueChange = {
-                onBrightness(it.toInt())
-            },
-            valueRange = 0f..4095f
-        )
-
-        Row(
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            ActionButton(
-                text = "ON",
-                modifier = Modifier.weight(1f),
-                enabled = connected
-            ) {
-                controller.setBrightness(
-                    brightness
-                )
-                onStatus(
-                    "DOT ON • " +
-                        brightness
-                )
-            }
-
-            ActionButton(
-                text = "OFF",
-                modifier = Modifier.weight(1f),
-                enabled = connected
-            ) {
-                controller.stopPattern()
-                onStatus("DOT OFF")
-            }
-        }
-    }
-
-    DataCard {
-        Text(
-            "QUICK PATTERNS",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        listOf(
-            "SINGLE BLINK" to
-                GlyphPatterns.single,
-            "DOUBLE BLINK" to
-                GlyphPatterns.double,
-            "FAST BLINK" to
-                GlyphPatterns.fast,
-            "SLOW PULSE" to
-                GlyphPatterns.slow,
-            "HEARTBEAT" to
-                GlyphPatterns.heartbeat
-        ).forEach { item ->
-            OutlinedAction(item.first) {
-                if (connected) {
-                    controller.playPattern(
-                        item.second,
-                        2
-                    )
-                    onStatus(
-                        "PLAYING • " +
-                            item.first
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ComposerPage(
-    context: Context,
-    controller: GlyphController,
-    steps: MutableList<GlyphStep>,
-    onSteps: (List<GlyphStep>) -> Unit,
-    onStatus: (String) -> Unit
-) {
-    SectionTitle(
-        "GLYPH COMPOSER",
-        "BLINK. PAUSE. REPEAT."
-    )
-
-    DataCard {
-        steps.forEachIndexed { index, step ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement =
-                    Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "STEP " +
-                        (index + 1),
-                    fontSize = 10.sp,
-                    color = Muted
-                )
-
-                Text(
-                    step.brightness
-                        .toString()
-                        .padStart(4, '0') +
-                        " • " +
-                        step.durationMs +
-                        "MS",
-                    fontSize = 9.sp,
-                    color = Paper
-                )
-            }
-
-            Slider(
-                value =
-                    step.brightness.toFloat(),
-                onValueChange = { value ->
-                    val next =
-                        steps.toMutableList()
-
-                    next[index] =
-                        step.copy(
-                            brightness =
-                                value.toInt()
-                        )
-
-                    onSteps(next)
-                },
-                valueRange = 0f..4095f
-            )
-
-            Row(
-                horizontalArrangement =
-                    Arrangement.spacedBy(7.dp)
-            ) {
-                listOf(
-                    120L,
-                    220L,
-                    420L,
-                    700L
-                ).forEach { duration ->
-                    FilterChip(
-                        selected =
-                            step.durationMs ==
-                                duration,
-                        onClick = {
-                            val next =
-                                steps.toMutableList()
-
-                            next[index] =
-                                step.copy(
-                                    durationMs =
-                                        duration
-                                )
-
-                            onSteps(next)
-                        },
-                        label = {
-                            Text(
-                                duration
-                                    .toString() +
-                                    "MS",
-                                fontSize = 9.sp
-                            )
-                        }
-                    )
-                }
-            }
-
-            if (steps.size > 1) {
-                TextButton(
-                    onClick = {
-                        val next =
-                            steps.toMutableList()
-
-                        next.removeAt(index)
-
-                        onSteps(next)
-                    }
-                ) {
-                    Text(
-                        "REMOVE",
-                        color = Red,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-
-            Divider(color = Line)
-        }
-
-        Row(
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            ActionButton(
-                text = "ADD STEP",
-                modifier = Modifier.weight(1f),
-                enabled = steps.size < 8
-            ) {
-                onSteps(
-                    steps +
-                        GlyphStep(
-                            4095,
-                            180
-                        )
-                )
-
-                onStatus(
-                    "STEP ADDED"
-                )
-            }
-
-            ActionButton(
-                text = "PLAY",
-                modifier = Modifier.weight(1f)
-            ) {
-                controller.playPattern(
-                    steps,
-                    2
-                )
-
-                onStatus(
-                    "PLAYING • CUSTOM"
-                )
-            }
-        }
-
-        OutlinedAction(
-            "PLAY WITH RINGTONE"
-        ) {
-            GlyphAction.playRingtoneAndPattern(
-                context,
-                steps
-            )
-
-            onStatus(
-                "RINGTONE + CUSTOM PATTERN"
-            )
-        }
-
-        OutlinedAction(
-            "SAVE TO DEVICE"
-        ) {
-            onStatus(
-                "CUSTOM PATTERN SAVED"
-            )
-        }
-    }
-
-    DataCard {
-        Text(
-            "STARTER PATTERNS",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        listOf(
-            "DOUBLE" to
-                GlyphPatterns.double,
-            "HEARTBEAT" to
-                GlyphPatterns.heartbeat,
-            "FAST" to
-                GlyphPatterns.fast,
-            "SLOW" to
-                GlyphPatterns.slow
-        ).forEach { item ->
-            OutlinedAction(
-                "LOAD " + item.first
-            ) {
-                onSteps(
-                    item.second
-                )
-
-                onStatus(
-                    "LOADED • " +
-                        item.first
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ModesPage(
-    context: Context,
-    visualizerOn: Boolean,
-    reminderOn: Boolean,
-    reminderInterval: Int,
-    chargingOn: Boolean,
-    gameScore: Int,
-    onVisualizer: () -> Unit,
-    onReminder: () -> Unit,
-    onInterval: (Int) -> Unit,
-    onCharging: () -> Unit,
-    onGame: () -> Unit,
-    onCamera: () -> Unit,
-    onRingtone: () -> Unit,
-    onStatus: (String) -> Unit
-) {
-    SectionTitle(
-        "SMART MODES",
-        "SOFTWARE MAKES THE DOT SMARTER."
-    )
-
-    FeatureCard(
-        title = "BEAT SYNC",
-        body =
-            "Read the phone's current audio output and flash the Glyph on detected beats.",
-        active = visualizerOn,
-        action = onVisualizer,
-        actionText =
-            if (visualizerOn) {
-                "STOP BEAT SYNC"
-            } else {
-                "START BEAT SYNC"
-            }
-    )
-
-    FeatureCard(
-        title = "NOTIFICATION REMINDERS",
-        body =
-            "Blink again for notifications that remain present.",
-        active = reminderOn,
-        action = onReminder,
-        actionText =
-            if (reminderOn) {
-                "DISABLE"
-            } else {
-                "ENABLE"
-            }
-    )
-
-    DataCard {
-        Text(
-            "REMINDER INTERVAL",
-            fontSize = 10.sp,
-            color = Muted
-        )
-
-        Row(
-            horizontalArrangement =
-                Arrangement.spacedBy(7.dp)
-        ) {
-            listOf(
-                1,
-                5,
-                10,
-                15
-            ).forEach { minutes ->
-                FilterChip(
-                    selected =
-                        reminderInterval ==
-                            minutes,
-                    onClick = {
-                        onInterval(minutes)
-                    },
-                    label = {
-                        Text(
-                            minutes
-                                .toString() +
-                                "M",
-                            fontSize = 9.sp
-                        )
-                    }
-                )
-            }
-        }
-
-        OutlinedAction(
-            "OPEN NOTIFICATION ACCESS"
-        ) {
-            context.startActivity(
-                Intent(
-                    Settings
-                        .ACTION_NOTIFICATION_LISTENER_SETTINGS
-                )
-            )
-        }
-    }
-
-    FeatureCard(
-        title = "CHARGING EFFECTS",
-        body =
-            "A brighter breathing ramp when charging starts.",
-        active = chargingOn,
-        action = onCharging,
-        actionText =
-            if (chargingOn) {
-                "DISABLE"
-            } else {
-                "ENABLE"
-            }
-    )
-
-    DataCard {
-        Text(
-            "CAMERA COUNTDOWN",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        Text(
-            "3 BLINKS → 2 BLINKS → 1 BLINK",
-            fontSize = 14.sp,
-            color = Paper
-        )
-
-        Text(
-            "OPEN THE CAMERA FIRST, THEN LET THE DOT COUNT.",
-            fontSize = 9.sp,
-            color = Muted
-        )
-
-        OutlinedAction(
-            "OPEN CAMERA + COUNTDOWN",
-            onClick = onCamera
-        )
-    }
-
-    DataCard {
-        Text(
-            "RINGTONE PATTERNS",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        Text(
-            "CURRENT RINGTONE + YOUR COMPOSER SEQUENCE.",
-            fontSize = 9.sp,
-            color = Muted
-        )
-
-        OutlinedAction(
-            "PLAY RINGTONE PATTERN",
-            onClick = onRingtone
-        )
-    }
-
-    DataCard {
-        Text(
-            "DOT TOY",
-            fontSize = 11.sp,
-            color = Muted
-        )
-
-        Text(
-            if (gameScore == 0) {
-                "TRIGGER THE DOT. BUILD A SCORE."
-            } else {
-                "REACTION COUNT • " +
-                    gameScore
-            },
-            fontSize = 15.sp,
-            color = Paper
-        )
-
-        ActionButton(
-            text = "TRIGGER",
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onGame
-        )
-    }
-}
-
-@Composable
-private fun SectionTitle(
-    title: String,
-    subtitle: String
-) {
-    Column(
-        verticalArrangement =
-            Arrangement.spacedBy(3.dp)
-    ) {
-        Text(
-            title,
-            fontSize = 19.sp,
-            color = Paper
-        )
-
-        Text(
-            subtitle,
-            fontSize = 9.sp,
-            letterSpacing = 1.sp,
-            color = Muted
-        )
-    }
-}
-
-@Composable
-private fun DataCard(
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Card(
-        colors =
-            CardDefaults.cardColors(
-                containerColor = Panel
-            ),
-        border =
-            BorderStroke(
-                1.dp,
-                Line
-            ),
-        shape =
-            RoundedCornerShape(10.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(15.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(10.dp),
-            content = content
-        )
-    }
-}
-
-@Composable
-private fun FeatureCard(
-    title: String,
-    body: String,
-    active: Boolean,
-    action: () -> Unit,
-    actionText: String
-) {
-    DataCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.SpaceBetween,
-            verticalAlignment =
-                Alignment.Top
-        ) {
-            Column(
-                modifier =
-                    Modifier.weight(1f)
-            ) {
-                Text(
-                    title,
-                    fontSize = 13.sp,
-                    color = Paper
-                )
-
-                Spacer(
-                    Modifier.height(4.dp)
-                )
-
-                Text(
-                    body,
-                    fontSize = 9.sp,
-                    color = Muted
-                )
-            }
-
-            Text(
-                if (active) "●" else "○",
-                fontSize = 18.sp,
-                color =
-                    if (active) Red
-                    else Muted
-            )
-        }
-
-        OutlinedAction(
-            actionText,
-            action
-        )
-    }
-}
-
-@Composable
-private fun ActionButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
-    Button(
-        modifier = modifier,
-        enabled = enabled,
-        onClick = onClick,
-        shape =
-            RoundedCornerShape(5.dp),
-        colors =
-            ButtonDefaults.buttonColors(
-                containerColor = Paper,
-                contentColor = Ink,
-                disabledContainerColor =
-                    Color(0xFF252525),
-                disabledContentColor =
-                    Color(0xFF666666)
-            )
-    ) {
-        Text(
-            text,
-            fontSize = 10.sp,
-            letterSpacing = .8.sp
         )
     }
 }
@@ -1582,24 +1746,54 @@ private fun ActionButton(
 @Composable
 private fun OutlinedAction(
     text: String,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val colors =
+        MaterialTheme.colorScheme
+
     OutlinedButton(
         modifier =
             Modifier.fillMaxWidth(),
-        onClick = onClick,
+        enabled =
+            enabled,
+        onClick =
+            onClick,
         shape =
-            RoundedCornerShape(5.dp),
+            RoundedCornerShape(
+                6.dp
+            ),
         border =
             BorderStroke(
                 1.dp,
-                Color(0xFF484848)
+                colors.outline
             )
     ) {
         Text(
             text,
+            fontFamily =
+                NDotFamily,
             fontSize = 10.sp,
-            letterSpacing = .8.sp
+            letterSpacing = .6.sp
         )
     }
+}
+
+@Composable
+private fun SmallNote(
+    text: String
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    Text(
+        text,
+        fontFamily =
+            NDotFamily,
+        fontSize = 9.sp,
+        color =
+            colors.onSurface.copy(
+                alpha = .55f
+            )
+    )
 }
