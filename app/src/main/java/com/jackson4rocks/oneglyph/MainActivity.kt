@@ -306,6 +306,9 @@ private fun OneGlyphApp() {
             playback = null
             toyOn = false
             controller.stopPattern()
+            GlyphBackgroundService.stopToy(
+                context
+            )
         }
     }
 
@@ -553,6 +556,10 @@ private fun OneGlyphApp() {
                                 if (!it) {
                                     beatSyncOn = false
                                     controller.stopPattern()
+                                    GlyphBackgroundService.stopToy(
+                                        context
+                                    )
+                                    toyOn = false
                                     status =
                                         "OneGlyph is off."
                                 } else {
@@ -623,15 +630,21 @@ private fun OneGlyphApp() {
                         onClick = {
                             if (toyOn) {
                                 toyOn = false
+                                GlyphBackgroundService.stopToy(
+                                    context
+                                )
                                 controller.stopPattern()
                                 status =
                                     "Dot toy off."
                             } else {
                                 beatSyncOn = false
+                                beatSync.close()
                                 toyOn = true
-                                controller.fastFlashLoop()
+                                GlyphBackgroundService.startToy(
+                                    context
+                                )
                                 status =
-                                    "Dot toy is flashing."
+                                    "Dot toy is flashing in the background."
                             }
                         }
                     )
