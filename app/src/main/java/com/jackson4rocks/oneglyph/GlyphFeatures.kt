@@ -731,22 +731,18 @@ class BeatSyncController(
             MusicBeatVisualizer(
                 appContext
             ) {
-                if (
-                    glyph.isReady()
-                ) {
-                    glyph.playPattern(
-                        listOf(
-                            GlyphStep(
-                                it,
-                                70
-                            ),
-                            GlyphStep(
-                                0,
-                                90
-                            )
+                glyph.playPattern(
+                    listOf(
+                        GlyphStep(
+                            it,
+                            70
+                        ),
+                        GlyphStep(
+                            0,
+                            90
                         )
                     )
-                }
+                )
             }
 
         if (next.start()) {
@@ -792,7 +788,7 @@ object GlyphAction {
 
         try {
             if (
-                !controller.awaitReady()
+                !controller.awaitReady(8_000L)
             ) {
                 return
             }
