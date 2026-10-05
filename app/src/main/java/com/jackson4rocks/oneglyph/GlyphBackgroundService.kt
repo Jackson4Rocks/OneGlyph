@@ -184,6 +184,8 @@ class GlyphBackgroundService : Service() {
                     STOP_FOREGROUND_REMOVE
                 )
                 stopSelf()
+
+                return START_NOT_STICKY
             }
         }
 
@@ -193,29 +195,14 @@ class GlyphBackgroundService : Service() {
     override fun onTaskRemoved(
         rootIntent: Intent?
     ) {
-        if (PatternStore(this).appEnabled()) {
-            try {
-                val restart =
-                    Intent(
-                        applicationContext,
-                        GlyphBackgroundService::class.java
-                    ).setAction(
-                        ACTION_KEEP_ALIVE
-                    )
-
-                if (Build.VERSION.SDK_INT >= 26) {
-                    startForegroundService(restart)
-                } else {
-                    startService(restart)
-                }
-            } catch (e: Throwable) {
-                android.util.Log.w(
-                    "OneGlyph",
-                    "Could not restart background service",
-                    e
-                )
-            }
-        }
+        // Do not launch a second foreground service from here. Android places
+        // restrictions on background FGS starts after the task has left the
+        // foreground. This service is already a foreground service, has
+        // stopWithTask=false, runs in its own process, and returns START_STICKY.
+        android.util.Log.d(
+            "OneGlyph",
+            "UI task removed; background Glyph service remains active."
+        )
 
         super.onTaskRemoved(rootIntent)
     }
