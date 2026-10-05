@@ -1247,15 +1247,3 @@ class ChargingCheckReceiver :
         }
     }
 }
-
-    BroadcastReceiver() {
-
-    override fun onReceive(
-        context: Context,
-        intent: Intent
-    ) {
-        ChargingMonitor.check(
-            context
-        )
-    }
-}
