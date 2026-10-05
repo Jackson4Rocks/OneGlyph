@@ -23,16 +23,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,21 +51,30 @@ private fun OneGlyphApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val controller = remember { GlyphController(context) }
 
-    var lights by remember { mutableStateOf(controller.availableLights()) }
-    var selectedId by remember { mutableStateOf(controller.autoSelect()) }
-    var brightness by remember { mutableIntStateOf(180) }
-    var status by remember {
-        mutableStateOf(
-            if (lights.isEmpty()) {
-                "No controllable lights found. OneGlyph needs the privileged lights permission and a Glyph-aware HAL."
-            } else {
-                "Ready"
-            }
-        )
+    var brightness by remember { mutableIntStateOf(2048) }
+    var status by remember { mutableStateOf("Connecting to Stock Glyph…") }
+    var connected by remember { mutableStateOf(false) }
+
+    DisposableEffect(controller) {
+        controller.setStatusListener { message ->
+            status = message
+            connected = controller.isReady()
+        }
+
+        onDispose {
+            controller.setStatusListener(null)
+            controller.close()
+        }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { controller.close() }
+    LaunchedEffect(controller) {
+        while (true) {
+            connected = controller.isReady()
+            if (!connected && !status.contains("error", ignoreCase = true)) {
+                status = "Connecting to Stock Glyph…"
+            }
+            delay(750)
+        }
     }
 
     Surface(
@@ -97,15 +107,19 @@ private fun OneGlyphApp() {
                 ) {
                     Text("Glyph control", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Selected light: " + (selectedId?.toString() ?: "none"),
+                        "Selected light: Stock Glyph dot",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Device: " + controller.targetDevice(),
                         style = MaterialTheme.typography.bodyMedium
                     )
 
-                    Text("Brightness: " + brightness)
+                    Text("Brightness: " + brightness + " / 4096")
                     Slider(
                         value = brightness.toFloat(),
                         onValueChange = { brightness = it.toInt() },
-                        valueRange = 1f..255f
+                        valueRange = 0f..4096f
                     )
 
                     Row(
@@ -114,8 +128,8 @@ private fun OneGlyphApp() {
                     ) {
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
-                                controller.stopPattern()
                                 controller.setBrightness(brightness)
                                 status = "Glyph ON"
                             }
@@ -125,9 +139,9 @@ private fun OneGlyphApp() {
 
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
                                 controller.stopPattern()
-                                controller.off()
                                 status = "Glyph OFF"
                             }
                         ) {
@@ -150,6 +164,7 @@ private fun OneGlyphApp() {
                     ) {
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
                                 controller.blink(brightness)
                                 status = "Blinking"
@@ -160,6 +175,7 @@ private fun OneGlyphApp() {
 
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
                                 controller.pulse(brightness)
                                 status = "Pulsing"
@@ -175,6 +191,7 @@ private fun OneGlyphApp() {
                     ) {
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
                                 controller.heartbeat(brightness)
                                 status = "Heartbeat"
@@ -185,6 +202,7 @@ private fun OneGlyphApp() {
 
                         Button(
                             modifier = Modifier.weight(1f),
+                            enabled = connected,
                             onClick = {
                                 controller.stopPattern()
                                 status = "Effect stopped"
@@ -201,51 +219,22 @@ private fun OneGlyphApp() {
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Available lights", style = MaterialTheme.typography.titleLarge)
-
-                    if (lights.isEmpty()) {
-                        Text(
-                            "No lights were returned by LightsManager.",
-                            color = Color.Gray
-                        )
-                    } else {
-                        lights.forEach { light ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    "ID " + light.id + "  •  ordinal " + light.ordinal,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(
-                                    onClick = {
-                                        if (controller.selectLight(light.id)) {
-                                            selectedId = light.id
-                                            status = "Selected light " + light.id
-                                        }
-                                    }
-                                ) {
-                                    Text(
-                                        if (selectedId == light.id) "Selected" else "Select"
-                                    )
-                                }
-                            }
-                        }
-                    }
-
+                    Text("Stock integration", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "OneGlyph talks to Nothing OS's GlyphService instead of the ordinary Android LightsManager list. The stock service owns the privileged Glyph light session.",
+                        color = Color.Gray
+                    )
+                    Text(
+                        "The Phone (3a) Lite has one physical Glyph Light dot, so this build exposes that dot directly instead of pretending there are multiple lights.",
+                        color = Color.Gray
+                    )
                     TextButton(
                         onClick = {
-                            lights = controller.availableLights()
-                            selectedId = controller.autoSelect()
-                            status = if (selectedId != null) {
-                                "Detected light " + selectedId
-                            } else {
-                                "No suitable Glyph light detected"
-                            }
+                            controller.connect()
+                            status = "Reconnecting to Stock Glyph…"
                         }
                     ) {
-                        Text("Refresh")
+                        Text("Reconnect")
                     }
                 }
             }
@@ -253,12 +242,7 @@ private fun OneGlyphApp() {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = status,
-                color = Color.Gray,
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text = "OneGlyph uses Android's standard LightsManager path. The custom ROM exposes the Glyph driver through the light HAL.",
-                color = Color.DarkGray,
+                color = if (connected) Color.LightGray else Color.Gray,
                 style = MaterialTheme.typography.bodySmall
             )
         }
