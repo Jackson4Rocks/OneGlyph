@@ -176,12 +176,15 @@ class PatternStore(context: Context) {
     }
 }
 
-class MusicVisualizer(
+class MusicBeatVisualizer(
     private val context: Context,
-    private val onLevel: (Int) -> Unit
+    private val onFrame: (brightness: Int, beat: Boolean) -> Unit
 ) {
     private var visualizer: Visualizer? = null
-    private var lastUpdateMs = 0L
+    private val energyHistory = ArrayDeque<Double>()
+    private var lastEnergy = 0.0
+    private var lastBeatMs = 0L
+    private var flashUntilMs = 0L
 
     fun start(): Boolean {
         val permission = ContextCompat.checkSelfPermission(
@@ -195,57 +198,125 @@ class MusicVisualizer(
 
         return try {
             stop()
+            energyHistory.clear()
+            lastEnergy = 0.0
+            lastBeatMs = 0L
+            flashUntilMs = 0L
 
-            val visualizer = Visualizer(0)
-            visualizer.captureSize =
-                Visualizer.getCaptureSizeRange().last()
+            val v = Visualizer(0)
+            v.captureSize = Visualizer.getCaptureSizeRange().last()
 
-            visualizer.setDataCaptureListener(
+            v.setDataCaptureListener(
                 object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(
                         capture: Visualizer,
                         waveform: ByteArray,
                         samplingRate: Int
-                    ) {
-                        val now = SystemClock.uptimeMillis()
-                        if (now - lastUpdateMs < 45L) return
-                        lastUpdateMs = now
-
-                        var sum = 0.0
-
-                        waveform.forEach { value ->
-                            val sample = value.toInt()
-                            sum += sample * sample
-                        }
-
-                        val rms = sqrt(
-                            sum / waveform.size.coerceAtLeast(1)
-                        )
-
-                        val level = (
-                            (rms / 96.0) * 4095.0
-                        ).toInt().coerceIn(
-                            450,
-                            4095
-                        )
-
-                        onLevel(level)
-                    }
+                    ) = Unit
 
                     override fun onFftDataCapture(
                         capture: Visualizer,
                         fft: ByteArray,
                         samplingRate: Int
-                    ) = Unit
+                    ) {
+                        if (fft.size < 8) return
+
+                        val now = SystemClock.uptimeMillis()
+                        val maxBin = minOf(
+                            fft.size / 2 - 1,
+                            24
+                        )
+
+                        var energy = 0.0
+                        var weightTotal = 0.0
+
+                        for (bin in 2..maxBin) {
+                            val real = fft[bin * 2].toInt()
+                            val imag = fft[bin * 2 + 1].toInt()
+                            val magnitude = sqrt(
+                                (real * real + imag * imag).toDouble()
+                            )
+
+                            // Heavier weighting on the low end where kick/snare
+                            // transients are most useful for a single-dot Glyph.
+                            val weight =
+                                1.0 + (1.0 / bin.coerceAtLeast(1))
+
+                            energy += magnitude * weight
+                            weightTotal += weight
+                        }
+
+                        if (weightTotal <= 0.0) return
+
+                        energy /= weightTotal
+
+                        energyHistory.addLast(energy)
+                        while (energyHistory.size > 28) {
+                            energyHistory.removeFirst()
+                        }
+
+                        if (energyHistory.size < 8) {
+                            lastEnergy = energy
+                            val warmup =
+                                ((energy / 18.0) * 900.0)
+                                    .toInt()
+                                    .coerceIn(320, 2600)
+                            onFrame(warmup, false)
+                            return
+                        }
+
+                        val baseline =
+                            energyHistory
+                                .dropLast(1)
+                                .average()
+                                .coerceAtLeast(1.0)
+
+                        val ratio = energy / baseline
+                        val rising = energy > lastEnergy * 1.08
+                        val cooldownReady =
+                            now - lastBeatMs >= 220L
+
+                        val beat =
+                            ratio >= 1.48 &&
+                                rising &&
+                                cooldownReady
+
+                        if (beat) {
+                            lastBeatMs = now
+                            flashUntilMs = now + 135L
+                        }
+
+                        lastEnergy = energy
+
+                        val normalized =
+                            (ratio * 1500.0)
+                                .toInt()
+                                .coerceIn(380, 3200)
+
+                        val brightness =
+                            if (now < flashUntilMs) {
+                                4095
+                            } else {
+                                normalized
+                            }
+
+                        onFrame(brightness, beat)
+                    }
                 },
                 Visualizer.getMaxCaptureRate() / 2,
-                true,
-                false
+                false,
+                true
             )
 
-            visualizer.enabled = true
-            this.visualizer = visualizer
+            v.enabled = true
+            visualizer = v
             true
+        } catch (_: SecurityException) {
+            stop()
+            false
+        } catch (_: UnsupportedOperationException) {
+            stop()
+            false
         } catch (_: Throwable) {
             stop()
             false
@@ -260,6 +331,7 @@ class MusicVisualizer(
         }
 
         visualizer = null
+        energyHistory.clear()
     }
 }
 
