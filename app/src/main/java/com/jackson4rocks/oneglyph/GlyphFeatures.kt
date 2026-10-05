@@ -925,6 +925,12 @@ object CameraCountdown {
     }
 }
 
+private val chargingScope =
+    CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.IO
+    )
+
 object ChargingMonitor {
     private const val CHECK_ACTION =
         "com.jackson4rocks.oneglyph.CHECK_CHARGING"
@@ -938,41 +944,23 @@ object ChargingMonitor {
     private const val MILESTONE =
         "charging_milestone"
 
-    fun onPowerConnected(
+    fun sync(
         context: Context
     ) {
-        val store =
-            PatternStore(context)
-
-        if (
-            !store.appEnabled() ||
-            !store.chargingEnabled()
-        ) {
-            return
-        }
-
-        storePrefs(context)
-            .edit()
-            .putBoolean(ACTIVE, true)
-            .putBoolean(MILESTONE, false)
-            .apply()
-
-        CoroutineScope(
-            Dispatchers.IO
-        ).launch {
-            GlyphAction.playOnce(
+        chargingScope.launch {
+            syncInternal(
                 context,
-                GlyphPatterns.repeated(
-                    onMs = 180,
-                    offMs = 180,
-                    count = 4
-                )
+                triggerConnectEffect = false
             )
         }
+    }
 
-        scheduleCheck(
+    suspend fun onPowerConnectedAndWait(
+        context: Context
+    ) {
+        syncInternal(
             context,
-            60_000L
+            triggerConnectEffect = true
         )
     }
 
@@ -991,44 +979,25 @@ object ChargingMonitor {
     fun onBoot(
         context: Context
     ) {
-        val battery =
-            context.registerReceiver(
-                null,
-                IntentFilter(
-                    Intent.ACTION_BATTERY_CHANGED
-                )
-            )
-
-        val plugged =
-            battery?.getIntExtra(
-                BatteryManager.EXTRA_PLUGGED,
-                0
-            ) ?: 0
-
-        if (plugged != 0) {
-            onPowerConnected(
-                context
-            )
-        }
+        sync(context)
     }
 
-    fun check(
+    suspend fun checkAndWait(
         context: Context
+    ) {
+        syncInternal(
+            context,
+            triggerConnectEffect = false
+        )
+    }
+
+    private suspend fun syncInternal(
+        context: Context,
+        triggerConnectEffect: Boolean
     ) {
         val store =
             PatternStore(context)
 
-        val prefs =
-            storePrefs(context)
-
-        if (
-            !store.appEnabled() ||
-            !store.chargingEnabled()
-        ) {
-            cancelCheck(context)
-            return
-        }
-
         val battery =
             context.registerReceiver(
                 null,
@@ -1043,11 +1012,50 @@ object ChargingMonitor {
                 0
             ) ?: 0
 
-        if (plugged == 0) {
-            onPowerDisconnected(
-                context
-            )
+        if (
+            !store.appEnabled() ||
+            !store.chargingEnabled() ||
+            plugged == 0
+        ) {
+            cancelCheck(context)
+
+            storePrefs(context)
+                .edit()
+                .putBoolean(ACTIVE, false)
+                .putBoolean(MILESTONE, false)
+                .apply()
+
             return
+        }
+
+        val prefs =
+            storePrefs(context)
+
+        val wasActive =
+            prefs.getBoolean(
+                ACTIVE,
+                false
+            )
+
+        prefs.edit()
+            .putBoolean(
+                ACTIVE,
+                true
+            )
+            .apply()
+
+        if (
+            triggerConnectEffect &&
+            !wasActive
+        ) {
+            GlyphAction.playOnce(
+                context,
+                GlyphPatterns.repeated(
+                    onMs = 180,
+                    offMs = 180,
+                    count = 4
+                )
+            )
         }
 
         val level =
@@ -1072,12 +1080,6 @@ object ChargingMonitor {
         val target =
             store.chargeTarget()
 
-        val active =
-            prefs.getBoolean(
-                ACTIVE,
-                false
-            )
-
         val done =
             prefs.getBoolean(
                 MILESTONE,
@@ -1085,7 +1087,6 @@ object ChargingMonitor {
             )
 
         if (
-            active &&
             !done &&
             percent >= target
         ) {
@@ -1096,18 +1097,14 @@ object ChargingMonitor {
                 )
                 .apply()
 
-            CoroutineScope(
-                Dispatchers.IO
-            ).launch {
-                GlyphAction.playOnce(
-                    context,
-                    GlyphPatterns.repeated(
-                        onMs = 120,
-                        offMs = 110,
-                        count = 9
-                    )
+            GlyphAction.playOnce(
+                context,
+                GlyphPatterns.repeated(
+                    onMs = 120,
+                    offMs = 110,
+                    count = 9
                 )
-            }
+            )
         }
 
         scheduleCheck(
@@ -1170,6 +1167,8 @@ object ChargingMonitor {
             Intent(
                 context,
                 ChargingCheckReceiver::class.java
+            ).setAction(
+                CHECK_ACTION
             )
 
         val pending =
@@ -1184,6 +1183,7 @@ object ChargingMonitor {
         alarm.cancel(
             pending
         )
+
         pending.cancel()
     }
 }
@@ -1195,29 +1195,60 @@ class ChargingEffectReceiver :
         context: Context,
         intent: Intent
     ) {
-        when (intent.action) {
-            Intent.ACTION_POWER_CONNECTED ->
-                ChargingMonitor
-                    .onPowerConnected(
-                        context
-                    )
+        val pendingResult =
+            goAsync()
 
-            Intent.ACTION_POWER_DISCONNECTED ->
-                ChargingMonitor
-                    .onPowerDisconnected(
-                        context
-                    )
+        chargingScope.launch {
+            try {
+                when (intent.action) {
+                    Intent.ACTION_POWER_CONNECTED ->
+                        ChargingMonitor
+                            .onPowerConnectedAndWait(
+                                context
+                            )
 
-            Intent.ACTION_BOOT_COMPLETED ->
-                ChargingMonitor
-                    .onBoot(
-                        context
-                    )
+                    Intent.ACTION_POWER_DISCONNECTED ->
+                        ChargingMonitor
+                            .onPowerDisconnected(
+                                context
+                            )
+
+                    Intent.ACTION_BOOT_COMPLETED ->
+                        ChargingMonitor
+                            .onBoot(
+                                context
+                            )
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 }
 
 class ChargingCheckReceiver :
+    BroadcastReceiver() {
+
+    override fun onReceive(
+        context: Context,
+        intent: Intent
+    ) {
+        val pendingResult =
+            goAsync()
+
+        chargingScope.launch {
+            try {
+                ChargingMonitor
+                    .checkAndWait(
+                        context
+                    )
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+}
+
     BroadcastReceiver() {
 
     override fun onReceive(
