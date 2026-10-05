@@ -220,6 +220,32 @@ class GlyphController(context: Context) : AutoCloseable {
         )
     }
 
+    fun fastFlashLoop(
+        brightness: Int = 4095,
+        onMs: Long = 70,
+        offMs: Long = 70
+    ) {
+        stopPatternOnly()
+
+        scope.launch {
+            while (isActive && ready) {
+                sendFrame(
+                    brightness.coerceIn(
+                        0,
+                        MAX_BRIGHTNESS
+                    )
+                )
+                delay(onMs.coerceAtLeast(35L))
+
+                sendFrame(0)
+
+                delay(offMs.coerceAtLeast(35L))
+            }
+
+            sendFrame(0)
+        }
+    }
+
     fun pulse(
         brightness: Int,
         periodMs: Long = 1100
