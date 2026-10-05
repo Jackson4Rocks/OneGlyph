@@ -215,6 +215,10 @@ private fun OneGlyphApp() {
         )
     }
 
+    var toyOn by remember {
+        mutableStateOf(false)
+    }
+
     val audioPermission =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
@@ -288,6 +292,7 @@ private fun OneGlyphApp() {
             beatSyncOn = false
             beatSync.close()
             playback = null
+            toyOn = false
             controller.stopPattern()
         }
     }
@@ -562,6 +567,55 @@ private fun OneGlyphApp() {
                             }
                         )
                     }
+                }
+
+                UserCard {
+                    Text(
+                        "DOT TOY",
+                        fontFamily = NDotFamily,
+                        fontSize = 10.sp,
+                        color =
+                            colors.onSurface.copy(
+                                alpha = .55f
+                            )
+                    )
+
+                    Text(
+                        if (toyOn) {
+                            "Flash mode is running."
+                        } else {
+                            "Make the dot go a little crazy."
+                        },
+                        fontFamily = NDotFamily,
+                        fontSize = 16.sp,
+                        color = colors.onSurface
+                    )
+
+                    PrimaryButton(
+                        text =
+                            if (toyOn) {
+                                "TURN OFF TOY"
+                            } else {
+                                "TURN ON TOY"
+                            },
+                        enabled =
+                            appEnabled &&
+                                connected,
+                        onClick = {
+                            if (toyOn) {
+                                toyOn = false
+                                controller.stopPattern()
+                                status =
+                                    "Dot toy off."
+                            } else {
+                                beatSyncOn = false
+                                toyOn = true
+                                controller.fastFlashLoop()
+                                status =
+                                    "Dot toy is flashing."
+                            }
+                        }
+                    )
                 }
 
                 Text(
