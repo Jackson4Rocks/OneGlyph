@@ -47,11 +47,11 @@ class GlyphBackgroundService : Service() {
         }
 
         fun stopToy(context: Context) {
-            context.startService(
+            context.stopService(
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                ).setAction(ACTION_TOY_OFF)
+                )
             )
         }
 
@@ -141,13 +141,45 @@ class GlyphBackgroundService : Service() {
         return START_STICKY
     }
 
-    private fun startToyLoop() {
+    override fun onTaskRemoved(
+        rootIntent: Intent?
+    ) {
         if (toyRunning) {
-            controller.fastFlashLoop()
-            return
+            try {
+                val restart =
+                    Intent(
+                        applicationContext,
+                        GlyphBackgroundService::class.java
+                    ).setAction(
+                        ACTION_TOY_ON
+                    )
+
+                if (
+                    Build.VERSION.SDK_INT >= 26
+                ) {
+                    startForegroundService(
+                        restart
+                    )
+                } else {
+                    startService(restart)
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w(
+                    "OneGlyph",
+                    "Could not request background service restart",
+                    e
+                )
+            }
         }
 
-        toyRunning = true
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun startToyLoop() {
+        if (!toyRunning) {
+            toyRunning = true
+        }
+
         controller.fastFlashLoop()
     }
 
