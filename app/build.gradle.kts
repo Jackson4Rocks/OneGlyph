@@ -1,5 +1,6 @@
-import HttpURLConnection
 import java.net.URI
+
+import HttpURLConnection
 
 plugins {
     id("com.android.application")
@@ -66,35 +67,16 @@ val bundleLeonProfile = tasks.register("bundleLeonProfile") {
     doLast {
         output.parentFile.mkdirs()
 
-        val connection =
-            URI(
-                "https://github.com/Jackson4Rocks.png?size=256"
-            )
-                .toURL()
-                .openConnection() as HttpURLConnection
-
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 10_000
-        connection.setRequestProperty(
-            "User-Agent",
-            "OneGlyph-Build"
+        URI(
+            "https://github.com/Jackson4Rocks.png?size=256"
         )
-
-        try {
-            check(
-                connection.responseCode in 200..399
-            ) {
-                "Could not bundle Leon's GitHub profile picture: HTTP ${connection.responseCode}"
-            }
-
-            connection.inputStream.use { input ->
+            .toURL()
+            .openStream()
+            .use { input ->
                 output.outputStream().use { outputStream ->
                     input.copyTo(outputStream)
                 }
             }
-        } finally {
-            connection.disconnect()
-        }
     }
 }
 
