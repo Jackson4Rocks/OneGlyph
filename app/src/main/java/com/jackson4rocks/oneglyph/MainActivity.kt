@@ -125,6 +125,8 @@ class MainActivity :
         setContent {
             OneGlyphApp()
         }
+
+        GlyphBackgroundService.ensureRunning(this)
     }
 }
 
@@ -225,6 +227,14 @@ private fun OneGlyphApp() {
         mutableStateOf(false)
     }
 
+    val notificationPermission =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) {
+            // The foreground service still works if notifications are denied,
+            // but Android may hide its ongoing notification from the shade.
+        }
+
     val audioPermission =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
@@ -299,6 +309,19 @@ private fun OneGlyphApp() {
         ChargingMonitor.sync(context)
     }
 
+    LaunchedEffect(Unit) {
+        if (
+            android.os.Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        }
+    }
+
     LaunchedEffect(appEnabled) {
         if (!appEnabled) {
             beatSyncOn = false
@@ -306,7 +329,7 @@ private fun OneGlyphApp() {
             playback = null
             toyOn = false
             controller.stopPattern()
-            GlyphBackgroundService.stopToy(
+            GlyphBackgroundService.stopService(
                 context
             )
         }
@@ -556,13 +579,16 @@ private fun OneGlyphApp() {
                                 if (!it) {
                                     beatSyncOn = false
                                     controller.stopPattern()
-                                    GlyphBackgroundService.stopToy(
+                                    GlyphBackgroundService.stopService(
                                         context
                                     )
                                     toyOn = false
                                     status =
                                         "OneGlyph is off."
                                 } else {
+                                    GlyphBackgroundService.ensureRunning(
+                                        context
+                                    )
                                     status =
                                         "OneGlyph is on."
                                 }
@@ -635,7 +661,7 @@ private fun OneGlyphApp() {
                                 )
                                 controller.stopPattern()
                                 status =
-                                    "Dot toy off."
+                                    "Dot toy off — background mode stays on."
                             } else {
                                 beatSyncOn = false
                                 beatSync.close()
