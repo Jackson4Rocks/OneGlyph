@@ -1,6 +1,7 @@
 package com.jackson4rocks.oneglyph
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -104,7 +105,7 @@ private fun OneGlyphApp() {
     val store =
         remember { PatternStore(context) }
 
-    var page by remember { mutableStateOf("DOT") }
+    var page by remember { mutableStateOf("HOME") }
     var brightness by remember {
         mutableIntStateOf(3200)
     }
@@ -119,8 +120,20 @@ private fun OneGlyphApp() {
         mutableStateOf(store.loadComposer())
     }
 
-    var visualizerOn by remember {
-        mutableStateOf(store.visualizerEnabled())
+    var beatSyncOn by remember {
+        mutableStateOf(false)
+    }
+
+    var audioAccess by remember {
+        mutableStateOf(hasAudioAccess(context))
+    }
+
+    var mediaAccess by remember {
+        mutableStateOf(hasMediaAccess(context))
+    }
+
+    var playback by remember {
+        mutableStateOf<MediaPlaybackInfo?>(null)
     }
 
     var reminderOn by remember {
@@ -147,16 +160,50 @@ private fun OneGlyphApp() {
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
-            visualizerOn = granted
+            audioAccess = granted
 
-            store.setVisualizerEnabled(granted)
+            if (granted && hasMediaAccess(context)) {
+                mediaAccess = true
+                beatSyncOn = true
+                status = "Waiting for music…"
+            } else if (granted) {
+                status =
+                    "Allow Media Access so OneGlyph can follow your music."
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                    )
+                )
+            } else {
+                status =
+                    "Audio access is needed for beat detection."
+            }
+        }
 
-            status =
-                if (granted) {
-                    "VISUALIZER READY"
-                } else {
-                    "MIC ACCESS REQUIRED FOR VISUALIZER"
+    val beatSync =
+        remember {
+            BeatSyncController(
+                context,
+                controller,
+                onState = { info ->
+                    playback = info
+                    status =
+                        when {
+                            info == null ->
+                                "Play something to start Beat Sync."
+
+                            info.isPlaying ->
+                                "Following the beat."
+
+                            else ->
+                                "Paused — the Glyph is off."
+                        }
+                },
+                onError = { message ->
+                    status = message
+                    beatSyncOn = false
                 }
+            )
         }
 
     val typography =
@@ -236,50 +283,42 @@ private fun OneGlyphApp() {
         ),
         typography = typography
     ) {
-        DisposableEffect(controller) {
+        DisposableEffect(beatSync) {
             controller.setStatusListener { message ->
-                status = message
+                if (!beatSyncOn) {
+                    status = message
+                }
                 connected = controller.isReady()
             }
 
             onDispose {
                 controller.setStatusListener(null)
+                beatSync.close()
                 controller.close()
             }
         }
 
-        LaunchedEffect(controller) {
-            while (true) {
-                connected = controller.isReady()
-                delay(800L)
+        LaunchedEffect(beatSyncOn) {
+            if (beatSyncOn) {
+                beatSync.start()
+            } else {
+                beatSync.close()
+                playback = null
+                controller.stopPattern()
             }
         }
 
-        DisposableEffect(
-            visualizerOn,
-            connected
-        ) {
-            if (!visualizerOn || !connected) {
-                return@DisposableEffect onDispose {}
-            }
+        LaunchedEffect(Unit) {
+            while (true) {
+                connected = controller.isReady()
+                audioAccess = hasAudioAccess(context)
+                mediaAccess = hasMediaAccess(context)
 
-            val visualizer =
-                MusicBeatVisualizer(context) { level, beat ->
-                    controller.setBrightness(level)
-                    if (beat) {
-                        status = "BEAT SYNC • HIT"
-                    }
+                if (beatSyncOn) {
+                    beatSync.refresh()
                 }
 
-            if (!visualizer.start()) {
-                visualizerOn = false
-                store.setVisualizerEnabled(false)
-                status = "VISUALIZER UNAVAILABLE"
-            }
-
-            onDispose {
-                visualizer.stop()
-                controller.off()
+                delay(900L)
             }
         }
 
@@ -304,10 +343,7 @@ private fun OneGlyphApp() {
                 verticalArrangement =
                     Arrangement.spacedBy(14.dp)
             ) {
-                Header(
-                    connected = connected,
-                    device = controller.targetDevice()
-                )
+                Header()
 
                 Row(
                     modifier = Modifier
@@ -322,9 +358,9 @@ private fun OneGlyphApp() {
                         Arrangement.spacedBy(4.dp)
                 ) {
                     listOf(
-                        "DOT",
+                        "HOME",
                         "COMPOSER",
-                        "MODES"
+                        "MORE"
                     ).forEach { item ->
                         Box(
                             modifier = Modifier
@@ -362,16 +398,60 @@ private fun OneGlyphApp() {
                 }
 
                 when (page) {
-                    "DOT" -> {
-                        DotPage(
+                    "HOME" -> {
+                        HomePage(
+                            context = context,
                             controller = controller,
-                            connected = connected,
+                            beatSyncOn = beatSyncOn,
+                            audioAccess = audioAccess,
+                            mediaAccess = mediaAccess,
+                            playback = playback,
                             brightness = brightness,
                             onBrightness = {
                                 brightness = it
                             },
-                            onStatus = {
-                                status = it
+                            onToggleBeatSync = {
+                                if (beatSyncOn) {
+                                    beatSyncOn = false
+                                    status =
+                                        "Beat Sync is off."
+                                } else if (!audioAccess) {
+                                    audioPermission.launch(
+                                        Manifest.permission.RECORD_AUDIO
+                                    )
+                                } else if (!mediaAccess) {
+                                    status =
+                                        "Allow Media Access so OneGlyph can follow what is playing."
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                                        )
+                                    )
+                                } else {
+                                    beatSyncOn = true
+                                    status =
+                                        "Waiting for music…"
+                                }
+                            },
+                            onOpenMediaAccess = {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                                    )
+                                )
+                            },
+                            onPattern = { pattern, name ->
+                                controller.playPattern(
+                                    pattern,
+                                    2
+                                )
+                                status =
+                                    "Playing " + name + "."
+                            },
+                            onStop = {
+                                controller.stopPattern()
+                                status =
+                                    "Glyph stopped."
                             }
                         )
                     }
@@ -393,31 +473,34 @@ private fun OneGlyphApp() {
                         )
                     }
 
-                    "MODES" -> {
+                    "MORE" -> {
                         ModesPage(
                             context = context,
-                            visualizerOn = visualizerOn,
+                            visualizerOn = beatSyncOn,
                             reminderOn = reminderOn,
                             reminderInterval =
                                 reminderInterval,
                             chargingOn = chargingOn,
                             gameScore = gameScore,
                             onVisualizer = {
-                                if (visualizerOn) {
-                                    visualizerOn = false
-                                    store.setVisualizerEnabled(false)
-                                } else if (
-                                    context.checkSelfPermission(
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) ==
-                                    PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    visualizerOn = true
-                                    store.setVisualizerEnabled(true)
-                                } else {
+                                if (beatSyncOn) {
+                                    beatSyncOn = false
+                                } else if (!audioAccess) {
                                     audioPermission.launch(
                                         Manifest.permission.RECORD_AUDIO
                                     )
+                                } else if (!mediaAccess) {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                                        )
+                                    )
+                                    status =
+                                        "Allow Media Access first."
+                                } else {
+                                    beatSyncOn = true
+                                    status =
+                                        "Waiting for music…"
                                 }
                             },
                             onReminder = {
@@ -532,10 +615,10 @@ private fun OneGlyphApp() {
                 )
 
                 Text(
-                    "STOCK GLYPHSERVICE • ONE DOT • LOCAL CONTROL",
+                    "ONEGLYPH • ONE DOT • JUST PRESS PLAY.",
                     fontFamily = NDotFamily,
                     fontSize = 9.sp,
-                    letterSpacing = 1.sp,
+                    letterSpacing = .8.sp,
                     color = Color(0xFF595959)
                 )
             }
@@ -544,87 +627,295 @@ private fun OneGlyphApp() {
 }
 
 @Composable
-private fun Header(
-    connected: Boolean,
-    device: String
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            Arrangement.SpaceBetween,
-        verticalAlignment =
-            Alignment.Top
+private fun Header() {
+    Column(
+        verticalArrangement =
+            Arrangement.spacedBy(3.dp)
     ) {
-        Column {
+        Text(
+            "ONEGLYPH",
+            fontFamily = NDotFamily,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Normal,
+            letterSpacing = (-1).sp,
+            color = Paper
+        )
+
+        Text(
+            "MAKE THE ONE DOT DO MORE.",
+            fontFamily = NDotFamily,
+            fontSize = 10.sp,
+            letterSpacing = 1.3.sp,
+            color = Muted
+        )
+    }
+}
+
+@Composable
+private fun HomePage(
+    context: Context,
+    controller: GlyphController,
+    beatSyncOn: Boolean,
+    audioAccess: Boolean,
+    mediaAccess: Boolean,
+    playback: MediaPlaybackInfo?,
+    brightness: Int,
+    onBrightness: (Int) -> Unit,
+    onToggleBeatSync: () -> Unit,
+    onOpenMediaAccess: () -> Unit,
+    onPattern: (List<GlyphStep>, String) -> Unit,
+    onStop: () -> Unit
+) {
+    UserCard {
+        Text(
+            "MUSIC",
+            fontFamily = NDotFamily,
+            fontSize = 11.sp,
+            color = Muted
+        )
+
+        Text(
+            when {
+                playback?.isPlaying == true ->
+                    "The dot is dancing."
+                playback != null ->
+                    "Music paused."
+                else ->
+                    "Make your music move the dot."
+            },
+            fontFamily = NDotFamily,
+            fontSize = 23.sp,
+            color = Paper
+        )
+
+        if (playback != null) {
             Text(
-                "ONEGLYPH",
+                playback.title.ifBlank { "Now playing" },
                 fontFamily = NDotFamily,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Normal,
-                letterSpacing = (-1).sp,
+                fontSize = 14.sp,
                 color = Paper
             )
 
             Text(
-                "MAKE THE ONE DOT DO MORE.",
+                playback.artist.ifBlank {
+                    "Media player"
+                },
                 fontFamily = NDotFamily,
                 fontSize = 10.sp,
-                letterSpacing = 1.3.sp,
                 color = Muted
             )
         }
 
-        Column(
-            horizontalAlignment = Alignment.End
-        ) {
-            Row(
-                modifier = Modifier
-                    .border(
-                        1.dp,
-                        Line,
-                        RoundedCornerShape(4.dp)
-                    )
-                    .padding(
-                        horizontal = 9.dp,
-                        vertical = 6.dp
-                    ),
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(
-                            if (connected) Red else Muted,
-                            RoundedCornerShape(50)
-                        )
-                )
+        PrimaryButton(
+            text =
+                if (beatSyncOn) {
+                    "TURN OFF BEAT SYNC"
+                } else {
+                    "TURN ON BEAT SYNC"
+                },
+            onClick = onToggleBeatSync
+        )
 
-                Text(
-                    "  " +
-                        if (connected) {
-                            "ONLINE"
-                        } else {
-                            "LINKING"
-                        },
-                    fontFamily = NDotFamily,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp,
-                    color = Paper
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(6.dp)
-            )
-
+        if (!audioAccess) {
             Text(
-                device,
+                "Audio access lets OneGlyph hear the phone's playing audio for beat timing.",
                 fontFamily = NDotFamily,
                 fontSize = 9.sp,
                 color = Muted
             )
         }
+
+        if (!mediaAccess) {
+            OutlinedAction(
+                "ALLOW MEDIA ACCESS",
+                onClick = onOpenMediaAccess
+            )
+        }
+
+        Text(
+            when {
+                playback?.isPlaying == true ->
+                    "Drums, kicks and other strong rhythm hits become short Glyph flashes."
+                playback != null ->
+                    "Paused means the Glyph stays off."
+                else ->
+                    "Play music from any Android media app, then turn Beat Sync on."
+            },
+            fontFamily = NDotFamily,
+            fontSize = 10.sp,
+            color = Muted
+        )
+    }
+
+    UserCard {
+        Text(
+            "QUICK BLINKS",
+            fontFamily = NDotFamily,
+            fontSize = 11.sp,
+            color = Muted
+        )
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            QuickButton(
+                "Blink",
+                Modifier.weight(1f)
+            ) {
+                onPattern(
+                    GlyphPatterns.single,
+                    "a blink"
+                )
+            }
+
+            QuickButton(
+                "Double",
+                Modifier.weight(1f)
+            ) {
+                onPattern(
+                    GlyphPatterns.double,
+                    "a double blink"
+                )
+            }
+
+            QuickButton(
+                "Heart",
+                Modifier.weight(1f)
+            ) {
+                onPattern(
+                    GlyphPatterns.heartbeat,
+                    "a heartbeat"
+                )
+            }
+        }
+
+        OutlinedAction(
+            "STOP GLYPH",
+            onClick = onStop
+        )
+    }
+
+    UserCard {
+        Text(
+            "BRIGHTNESS",
+            fontFamily = NDotFamily,
+            fontSize = 11.sp,
+            color = Muted
+        )
+
+        Text(
+            brightness.toString(),
+            fontFamily = NDotFamily,
+            fontSize = 34.sp,
+            color = Paper
+        )
+
+        Slider(
+            value = brightness.toFloat(),
+            onValueChange = {
+                onBrightness(it.toInt())
+            },
+            valueRange = 0f..4095f
+        )
+
+        OutlinedAction(
+            "TEST BRIGHTNESS"
+        ) {
+            controller.playPattern(
+                listOf(
+                    GlyphStep(
+                        brightness,
+                        250
+                    ),
+                    GlyphStep(
+                        0,
+                        250
+                    )
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun UserCard(
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        colors =
+            CardDefaults.cardColors(
+                containerColor = Panel
+            ),
+        border =
+            BorderStroke(
+                1.dp,
+                Line
+            ),
+        shape =
+            RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(10.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun PrimaryButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Button(
+        modifier =
+            modifier.fillMaxWidth(),
+        onClick = onClick,
+        shape =
+            RoundedCornerShape(6.dp),
+        colors =
+            ButtonDefaults.buttonColors(
+                containerColor = Paper,
+                contentColor = Ink
+            )
+    ) {
+        Text(
+            text,
+            fontFamily = NDotFamily,
+            fontSize = 10.sp,
+            letterSpacing = .7.sp
+        )
+    }
+}
+
+@Composable
+private fun QuickButton(
+    text: String,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        modifier = modifier,
+        onClick = onClick,
+        shape =
+            RoundedCornerShape(6.dp),
+        border =
+            BorderStroke(
+                1.dp,
+                Color(0xFF4A4A4A)
+            )
+    ) {
+        Text(
+            text,
+            fontFamily = NDotFamily,
+            fontSize = 9.sp
+        )
     }
 }
 
