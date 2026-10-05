@@ -61,6 +61,7 @@
 
         <service
             android:name=".GlyphBackgroundService"
+            android:process=":oneglyph_bg"
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="specialUse">
