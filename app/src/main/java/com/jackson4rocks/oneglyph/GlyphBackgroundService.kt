@@ -55,6 +55,22 @@ class GlyphBackgroundService : Service() {
         const val ACTION_STOP =
             "com.jackson4rocks.oneglyph.action.STOP"
 
+
+        const val ACTION_PLAY_PATTERN =
+            "com.jackson4rocks.oneglyph.action.PLAY_PATTERN"
+
+        const val ACTION_STOP_PATTERN =
+            "com.jackson4rocks.oneglyph.action.STOP_PATTERN"
+
+        private const val EXTRA_BRIGHTNESSES =
+            "brightnesses"
+
+        private const val EXTRA_DURATIONS =
+            "durations"
+
+        private const val EXTRA_REPEAT =
+            "repeat"
+
         private const val PREFS =
             "oneglyph_background"
 
@@ -173,6 +189,71 @@ class GlyphBackgroundService : Service() {
                 )
             )
         }
+
+        fun playPattern(
+            context: Context,
+            steps: List<GlyphStep>,
+            repeat: Int = 1
+        ) {
+            val clean =
+                steps
+                    .filter { it.durationMs > 0L }
+                    .take(32)
+
+            if (clean.isEmpty()) {
+                return
+            }
+
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).apply {
+                    action = ACTION_PLAY_PATTERN
+
+                    putIntegerArrayListExtra(
+                        EXTRA_BRIGHTNESSES,
+                        ArrayList(
+                            clean.map { it.brightness }
+                        )
+                    )
+
+                    putExtra(
+                        EXTRA_DURATIONS,
+                        clean
+                            .map { it.durationMs }
+                            .toLongArray()
+                    )
+
+                    putExtra(
+                        EXTRA_REPEAT,
+                        repeat.coerceIn(1, 32)
+                    )
+                }
+            )
+        }
+
+        fun stopPattern(
+            context: Context
+        ) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(
+                    ACTION_STOP_PATTERN
+                )
+            )
+        }
+
+        fun isGlyphReady(
+            context: Context
+        ): Boolean =
+            java.io.File(
+                "/sys/class/leds/noth_leds/state"
+            ).exists()
 
         fun currentMode(
             context: Context
@@ -547,6 +628,41 @@ class GlyphBackgroundService : Service() {
             ACTION_KEEP_ALIVE,
             null -> {
                 restoreMode()
+            }
+
+            ACTION_PLAY_PATTERN -> {
+                val brightnesses =
+                    intent?.getIntegerArrayListExtra(
+                        EXTRA_BRIGHTNESSES
+                    )
+
+                val durations =
+                    intent?.getLongArrayExtra(
+                        EXTRA_DURATIONS
+                    )
+
+                if (
+                    brightnesses != null &&
+                    durations != null &&
+                    brightnesses.size == durations.size
+                ) {
+                    controller.playPattern(
+                        brightnesses.indices.map { index ->
+                            GlyphStep(
+                                brightnesses[index],
+                                durations[index]
+                            )
+                        },
+                        intent?.getIntExtra(
+                            EXTRA_REPEAT,
+                            1
+                        ) ?: 1
+                    )
+                }
+            }
+
+            ACTION_STOP_PATTERN -> {
+                controller.stopPattern()
             }
 
             ACTION_STOP -> {
