@@ -169,8 +169,8 @@ private fun OneGlyphApp() {
 
     var beatSyncOn by remember {
         mutableStateOf(
-            GlyphBackgroundService
-                .isMusicSyncEnabled(context)
+            store.backgroundMode() ==
+                "music_sync"
         )
     }
 
@@ -228,8 +228,8 @@ private fun OneGlyphApp() {
 
     var toyOn by remember {
         mutableStateOf(
-            GlyphBackgroundService
-                .isToyEnabled(context)
+            store.backgroundMode() ==
+                "toy"
         )
     }
 
@@ -294,8 +294,17 @@ private fun OneGlyphApp() {
                 openMediaAccess(context)
             } else {
                 mediaAccess = true
+                store.setBackgroundMode(
+                    "music_sync"
+                )
                 toyOn = false
                 beatSyncOn = true
+                requestBackgroundRecoveryAccess(
+                    context
+                )
+                GlyphBackgroundService.startMusicSync(
+                    context
+                )
                 status =
                     "Waiting for music…"
             }
@@ -362,16 +371,6 @@ private fun OneGlyphApp() {
                 context
             )
             GlyphBackgroundService.startMusicSync(
-                context
-            )
-        } else if (
-            !beatSyncOn &&
-            appEnabled &&
-            GlyphBackgroundService.isMusicSyncEnabled(
-                context
-            )
-        ) {
-            GlyphBackgroundService.stopMusicSync(
                 context
             )
         }
@@ -527,7 +526,13 @@ private fun OneGlyphApp() {
                                     status =
                                         "Turn on OneGlyph in Settings first."
                                 } else if (beatSyncOn) {
+                                    store.setBackgroundMode(
+                                        "none"
+                                    )
                                     beatSyncOn = false
+                                    GlyphBackgroundService.stopMusicSync(
+                                        context
+                                    )
                                     status =
                                         "Beat Sync is off."
                                 } else if (!audioAccess) {
@@ -541,10 +546,19 @@ private fun OneGlyphApp() {
                                         context
                                     )
                                 } else {
+                                    store.setBackgroundMode(
+                                        "music_sync"
+                                    )
                                     toyOn = false
                                     beatSyncOn = true
+                                    requestBackgroundRecoveryAccess(
+                                        context
+                                    )
+                                    GlyphBackgroundService.startMusicSync(
+                                        context
+                                    )
                                     status =
-                                        "Waiting for music…"
+                                        "Music Sync is on."
                                 }
                             },
                             onMediaAccess = {
@@ -619,6 +633,9 @@ private fun OneGlyphApp() {
                                 store.setAppEnabled(it)
 
                                 if (!it) {
+                                    store.setBackgroundMode(
+                                        "none"
+                                    )
                                     beatSyncOn = false
                                     controller.stopPattern()
                                     GlyphBackgroundService.stopService(
@@ -697,14 +714,20 @@ private fun OneGlyphApp() {
                                 connected,
                         onClick = {
                             if (toyOn) {
+                                store.setBackgroundMode(
+                                    "none"
+                                )
                                 toyOn = false
                                 GlyphBackgroundService.stopToy(
                                     context
                                 )
                                 controller.stopPattern()
                                 status =
-                                    "Dot toy off — background mode stays on."
+                                    "Dot toy off."
                             } else {
+                                store.setBackgroundMode(
+                                    "toy"
+                                )
                                 beatSyncOn = false
                                 toyOn = true
                                 requestBackgroundRecoveryAccess(
@@ -714,7 +737,7 @@ private fun OneGlyphApp() {
                                     context
                                 )
                                 status =
-                                    "Dot toy is flashing in the background."
+                                    "Dot toy is on."
                             }
                         }
                     )
