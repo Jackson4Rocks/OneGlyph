@@ -24,6 +24,12 @@ class GlyphBackgroundService : Service() {
         const val ACTION_TOY_OFF =
             "com.jackson4rocks.oneglyph.action.TOY_OFF"
 
+        const val ACTION_MUSIC_SYNC_ON =
+            "com.jackson4rocks.oneglyph.action.MUSIC_SYNC_ON"
+
+        const val ACTION_MUSIC_SYNC_OFF =
+            "com.jackson4rocks.oneglyph.action.MUSIC_SYNC_OFF"
+
         const val ACTION_KEEP_ALIVE =
             "com.jackson4rocks.oneglyph.action.KEEP_ALIVE"
 
@@ -33,34 +39,94 @@ class GlyphBackgroundService : Service() {
         private const val PREFS =
             "oneglyph_background"
 
-        private const val TOY_ENABLED =
+        private const val MODE =
+            "mode"
+
+        private const val LEGACY_TOY_ENABLED =
             "toy_enabled"
 
-        fun startToy(context: Context) {
-            val intent =
+        private const val MODE_NONE =
+            "none"
+
+        private const val MODE_TOY =
+            "toy"
+
+        private const val MODE_MUSIC_SYNC =
+            "music_sync"
+
+        fun isToyEnabled(
+            context: Context
+        ): Boolean =
+            readMode(context) == MODE_TOY
+
+        fun isMusicSyncEnabled(
+            context: Context
+        ): Boolean =
+            readMode(context) == MODE_MUSIC_SYNC
+
+        fun startToy(
+            context: Context
+        ) {
+            start(
+                context,
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                ).setAction(ACTION_TOY_ON)
-
-            start(
-                context,
-                intent
+                ).setAction(
+                    ACTION_TOY_ON
+                )
             )
         }
 
-        fun stopToy(context: Context) {
+        fun stopToy(
+            context: Context
+        ) {
             start(
                 context,
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                ).setAction(ACTION_TOY_OFF)
+                ).setAction(
+                    ACTION_TOY_OFF
+                )
             )
         }
 
-        fun ensureRunning(context: Context) {
-            if (!PatternStore(context).appEnabled()) {
+        fun startMusicSync(
+            context: Context
+        ) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(
+                    ACTION_MUSIC_SYNC_ON
+                )
+            )
+        }
+
+        fun stopMusicSync(
+            context: Context
+        ) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(
+                    ACTION_MUSIC_SYNC_OFF
+                )
+            )
+        }
+
+        fun ensureRunning(
+            context: Context
+        ) {
+            if (
+                !PatternStore(context)
+                    .appEnabled()
+            ) {
                 return
             }
 
@@ -69,18 +135,83 @@ class GlyphBackgroundService : Service() {
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                ).setAction(ACTION_KEEP_ALIVE)
+                ).setAction(
+                    ACTION_KEEP_ALIVE
+                )
             )
         }
 
-        fun stopService(context: Context) {
+        fun stopService(
+            context: Context
+        ) {
             start(
                 context,
                 Intent(
                     context,
                     GlyphBackgroundService::class.java
-                ).setAction(ACTION_STOP)
+                ).setAction(
+                    ACTION_STOP
+                )
             )
+        }
+
+        private fun readMode(
+            context: Context
+        ): String {
+            val prefs =
+                context.getSharedPreferences(
+                    PREFS,
+                    Context.MODE_PRIVATE
+                )
+
+            val stored =
+                prefs.getString(
+                    MODE,
+                    null
+                )
+
+            if (!stored.isNullOrBlank()) {
+                return stored
+            }
+
+            // Migrate the old Dot Toy preference once.
+            return if (
+                prefs.getBoolean(
+                    LEGACY_TOY_ENABLED,
+                    false
+                )
+            ) {
+                prefs.edit()
+                    .putString(
+                        MODE,
+                        MODE_TOY
+                    )
+                    .apply()
+
+                MODE_TOY
+            } else {
+                MODE_NONE
+            }
+        }
+
+        private fun saveMode(
+            context: Context,
+            mode: String
+        ) {
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE
+            )
+                .edit()
+                .putString(
+                    MODE,
+                    mode
+                )
+                .putBoolean(
+                    LEGACY_TOY_ENABLED,
+                    mode == MODE_TOY
+                )
+                .apply()
         }
 
         private fun start(
@@ -102,8 +233,11 @@ class GlyphBackgroundService : Service() {
     private lateinit var controller:
         GlyphController
 
-    private var toyRunning =
-        false
+    private var currentMode =
+        MODE_NONE
+
+    private var musicSync:
+        BeatSyncController? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -125,18 +259,10 @@ class GlyphBackgroundService : Service() {
                 applicationContext
             )
 
-        toyRunning =
-            getSharedPreferences(
-                PREFS,
-                MODE_PRIVATE
-            ).getBoolean(
-                TOY_ENABLED,
-                false
-            )
+        currentMode =
+            readMode(this)
 
-        if (toyRunning) {
-            startToyLoop()
-        }
+        restoreMode()
     }
 
     override fun onStartCommand(
@@ -144,41 +270,60 @@ class GlyphBackgroundService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+        if (
+            !PatternStore(this).appEnabled()
+        ) {
+            stopForeground(
+                STOP_FOREGROUND_REMOVE
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         when (intent?.action) {
             ACTION_TOY_ON -> {
-                saveToyState(true)
-                startToyLoop()
+                setMode(
+                    MODE_TOY
+                )
             }
 
             ACTION_TOY_OFF -> {
-                saveToyState(false)
-                stopToyLoop()
+                if (
+                    currentMode ==
+                        MODE_TOY
+                ) {
+                    setMode(
+                        MODE_NONE
+                    )
+                }
             }
 
-            ACTION_KEEP_ALIVE -> {
-                if (!PatternStore(this).appEnabled()) {
-                    stopForeground(
-                        STOP_FOREGROUND_REMOVE
+            ACTION_MUSIC_SYNC_ON -> {
+                setMode(
+                    MODE_MUSIC_SYNC
+                )
+            }
+
+            ACTION_MUSIC_SYNC_OFF -> {
+                if (
+                    currentMode ==
+                        MODE_MUSIC_SYNC
+                ) {
+                    setMode(
+                        MODE_NONE
                     )
-                    stopSelf()
-                    return START_NOT_STICKY
                 }
+            }
 
-                if (!::controller.isInitialized) {
-                    controller =
-                        GlyphController(
-                            applicationContext
-                        )
-                }
-
-                if (toyRunning) {
-                    startToyLoop()
-                }
+            ACTION_KEEP_ALIVE,
+            null -> {
+                restoreMode()
             }
 
             ACTION_STOP -> {
-                saveToyState(false)
-                stopToyLoop()
+                setMode(
+                    MODE_NONE
+                )
 
                 stopForeground(
                     STOP_FOREGROUND_REMOVE
@@ -195,44 +340,122 @@ class GlyphBackgroundService : Service() {
     override fun onTaskRemoved(
         rootIntent: Intent?
     ) {
-        // Do not launch a second foreground service from here. Android places
-        // restrictions on background FGS starts after the task has left the
-        // foreground. This service is already a foreground service, has
-        // stopWithTask=false, runs in its own process, and returns START_STICKY.
         android.util.Log.d(
             "OneGlyph",
-            "UI task removed; background Glyph service remains active."
+            "UI task removed; background mode remains active: " +
+                currentMode
         )
 
-        super.onTaskRemoved(rootIntent)
+        super.onTaskRemoved(
+            rootIntent
+        )
+    }
+
+    private fun restoreMode() {
+        when (
+            currentMode
+        ) {
+            MODE_TOY ->
+                startToyLoop()
+
+            MODE_MUSIC_SYNC ->
+                startMusicSyncLoop()
+
+            else -> {
+                stopToyLoop()
+                stopMusicSyncLoop()
+            }
+        }
+    }
+
+    private fun setMode(
+        mode: String
+    ) {
+        currentMode = mode
+
+        saveMode(
+            this,
+            mode
+        )
+
+        when (mode) {
+            MODE_TOY -> {
+                stopMusicSyncLoop()
+                startToyLoop()
+            }
+
+            MODE_MUSIC_SYNC -> {
+                stopToyLoop()
+                startMusicSyncLoop()
+            }
+
+            else -> {
+                stopToyLoop()
+                stopMusicSyncLoop()
+            }
+        }
     }
 
     private fun startToyLoop() {
-        if (!toyRunning) {
-            toyRunning = true
-        }
+        musicSync?.close()
+        musicSync = null
 
         controller.fastFlashLoop()
+
+        android.util.Log.d(
+            "OneGlyph",
+            "Dot Toy enabled persistently."
+        )
     }
 
     private fun stopToyLoop() {
-        toyRunning = false
         controller.stopPattern()
     }
 
-    private fun saveToyState(
-        enabled: Boolean
-    ) {
-        getSharedPreferences(
-            PREFS,
-            MODE_PRIVATE
+    private fun startMusicSyncLoop() {
+        musicSync?.start()
+            ?: run {
+                musicSync =
+                    BeatSyncController(
+                        applicationContext,
+                        controller,
+                        onState = { info ->
+                            android.util.Log.d(
+                                "OneGlyph",
+                                if (
+                                    info?.isPlaying == true
+                                ) {
+                                    "Music Sync following playback."
+                                } else if (
+                                    info != null
+                                ) {
+                                    "Music Sync paused."
+                                } else {
+                                    "Music Sync waiting for media."
+                                }
+                            )
+                        },
+                        onError = { message ->
+                            android.util.Log.w(
+                                "OneGlyph",
+                                "Music Sync: " +
+                                    message
+                            )
+                        }
+                    )
+
+                musicSync?.start()
+            }
+
+        android.util.Log.d(
+            "OneGlyph",
+            "Music Sync enabled persistently."
         )
-            .edit()
-            .putBoolean(
-                TOY_ENABLED,
-                enabled
-            )
-            .apply()
+    }
+
+    private fun stopMusicSyncLoop() {
+        musicSync?.close()
+        musicSync = null
     }
 
     private fun createNotificationChannel() {
@@ -254,8 +477,13 @@ class GlyphBackgroundService : Service() {
                 description =
                     "Keeps OneGlyph running in the background."
                 setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
+                setSound(
+                    null,
+                    null
+                )
+                enableVibration(
+                    false
+                )
             }
         )
     }
@@ -269,7 +497,9 @@ class GlyphBackgroundService : Service() {
                     CHANNEL_ID
                 )
             } else {
-                Notification.Builder(this)
+                Notification.Builder(
+                    this
+                )
             }
 
         return builder
@@ -279,7 +509,9 @@ class GlyphBackgroundService : Service() {
             .setContentTitle(
                 "Keep Blinking!"
             )
-            .setOngoing(true)
+            .setOngoing(
+                true
+            )
             .setCategory(
                 Notification.CATEGORY_SERVICE
             )
@@ -288,6 +520,9 @@ class GlyphBackgroundService : Service() {
 
     override fun onDestroy() {
         try {
+            musicSync?.close()
+            musicSync = null
+
             controller.stopPattern()
             controller.close()
         } catch (_: Exception) {
