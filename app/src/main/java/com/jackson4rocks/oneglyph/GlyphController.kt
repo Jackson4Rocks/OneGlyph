@@ -10,6 +10,9 @@ import android.os.Looper
 import android.os.Parcel
 import android.os.SystemClock
 import android.util.Log
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +25,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 class GlyphController(context: Context) : AutoCloseable {
+    private enum class Backend {
+        NONE,
+        STOCK,
+        GALAXIAN_SYSFS
+    }
     companion object {
         private const val TAG =
             "OneGlyph"
@@ -51,6 +59,15 @@ class GlyphController(context: Context) : AutoCloseable {
 
         private const val MAX_BRIGHTNESS =
             4095
+
+        private const val GALAXIAN_STATE_PATH =
+            "/sys/class/leds/noth_leds/state"
+
+        private const val GALAXIAN_BLINK_MIN_MS =
+            20L
+
+        private const val GALAXIAN_BLINK_MAX_MS =
+            60_000L
 
         private const val CONNECT_RETRY_MS =
             500L
@@ -101,6 +118,10 @@ class GlyphController(context: Context) : AutoCloseable {
     private var statusListener:
         ((String) -> Unit)? = null
 
+    @Volatile
+    private var backend =
+        Backend.NONE
+
     private val serviceConnection =
         object : ServiceConnection {
             override fun onServiceConnected(
@@ -142,6 +163,7 @@ class GlyphController(context: Context) : AutoCloseable {
                             TX_OPEN_SESSION
                         )
 
+                        backend = Backend.STOCK
                         ready = true
                         waiter.complete(Unit)
 
@@ -152,6 +174,7 @@ class GlyphController(context: Context) : AutoCloseable {
                     } catch (e: Throwable) {
                         ready = false
                         binder = null
+                        backend = Backend.NONE
 
                         if (!waiter.isCompleted) {
                             waiter.completeExceptionally(
@@ -167,8 +190,10 @@ class GlyphController(context: Context) : AutoCloseable {
                                 )
                         )
 
-                        safeUnbind()
-                        scheduleReconnect()
+                        if (!activateGalaxianBackend()) {
+                            safeUnbind()
+                            scheduleReconnect()
+                        }
                     }
                 }
             }
@@ -292,6 +317,10 @@ class GlyphController(context: Context) : AutoCloseable {
                     )
                 }
 
+                if (activateGalaxianBackend()) {
+                    return
+                }
+
                 postStatus(
                     "GLYPH SERVICE NOT AVAILABLE"
                 )
@@ -321,6 +350,10 @@ class GlyphController(context: Context) : AutoCloseable {
                 e
             )
 
+            if (activateGalaxianBackend()) {
+                return
+            }
+
             postStatus(
                 "GLYPH PERMISSION DENIED"
             )
@@ -341,6 +374,10 @@ class GlyphController(context: Context) : AutoCloseable {
                 "Glyph service bind failed",
                 e
             )
+
+            if (activateGalaxianBackend()) {
+                return
+            }
 
             postStatus(
                 "GLYPH SERVICE ERROR"
@@ -400,6 +437,10 @@ class GlyphController(context: Context) : AutoCloseable {
             }
 
             delay(40L)
+        }
+
+        if (!ready && activateGalaxianBackend()) {
+            return true
         }
 
         return ready
@@ -524,6 +565,21 @@ class GlyphController(context: Context) : AutoCloseable {
         offMs: Long = 70
     ) {
         stopPatternOnly()
+
+        if (backend == Backend.GALAXIAN_SYSFS) {
+            effectJob =
+                scope.launch {
+                    if (awaitReady()) {
+                        writeGalaxianState(
+                            onMs.coerceIn(
+                                GALAXIAN_BLINK_MIN_MS,
+                                GALAXIAN_BLINK_MAX_MS
+                            ).toInt()
+                        )
+                    }
+                }
+            return
+        }
 
         effectJob =
             scope.launch {
@@ -694,6 +750,26 @@ class GlyphController(context: Context) : AutoCloseable {
     private fun sendFrame(
         brightness: Int
     ): Boolean {
+        if (backend == Backend.GALAXIAN_SYSFS) {
+            val state =
+                if (brightness <= 0) {
+                    0
+                } else {
+                    1
+                }
+
+            val ok =
+                writeGalaxianState(state)
+
+            if (!ok) {
+                postStatus(
+                    "GALAXIAN GLYPH WRITE FAILED • ROOT REQUIRED"
+                )
+            }
+
+            return ok
+        }
+
         val service =
             binder
 
@@ -767,6 +843,112 @@ class GlyphController(context: Context) : AutoCloseable {
             scheduleReconnect()
 
             return false
+        }
+    }
+
+    private fun isGalaxianNodePresent(): Boolean =
+        File(GALAXIAN_STATE_PATH).exists()
+
+    private fun activateGalaxianBackend(): Boolean {
+        if (!isGalaxianNodePresent() || closed) {
+            return false
+        }
+
+        safeUnbind()
+
+        binder = null
+        binding = false
+        bound = false
+        backend = Backend.GALAXIAN_SYSFS
+        ready = true
+
+        if (!readySignal.isCompleted) {
+            readySignal.complete(Unit)
+        }
+
+        postStatus(
+            "READY • GALAXIAN SYSFS"
+        )
+
+        return true
+    }
+
+    private fun writeGalaxianState(
+        state: Int
+    ): Boolean {
+        val value =
+            state.coerceIn(
+                0,
+                GALAXIAN_BLINK_MAX_MS.toInt()
+            )
+
+        try {
+            FileOutputStream(
+                GALAXIAN_STATE_PATH
+            ).use { output ->
+                output.write(
+                    "$value\n".toByteArray()
+                )
+                output.flush()
+            }
+
+            return true
+        } catch (e: Throwable) {
+            Log.d(
+                TAG,
+                "Direct Galaxian sysfs write failed; trying su",
+                e
+            )
+        }
+
+        val command =
+            "printf '%d\\n' $value > '$GALAXIAN_STATE_PATH'"
+
+        return try {
+            val process =
+                ProcessBuilder(
+                    "su",
+                    "-c",
+                    command
+                )
+                    .redirectErrorStream(true)
+                    .start()
+
+            if (
+                !process.waitFor(
+                    3L,
+                    TimeUnit.SECONDS
+                )
+            ) {
+                process.destroyForcibly()
+
+                Log.w(
+                    TAG,
+                    "su timed out while writing Galaxian Glyph"
+                )
+
+                false
+            } else {
+                val exitCode =
+                    process.exitValue()
+
+                if (exitCode != 0) {
+                    Log.w(
+                        TAG,
+                        "su write failed with exit code $exitCode"
+                    )
+                }
+
+                exitCode == 0
+            }
+        } catch (e: Throwable) {
+            Log.e(
+                TAG,
+                "Unable to write Galaxian Glyph through su",
+                e
+            )
+
+            false
         }
     }
 
@@ -944,9 +1126,14 @@ class GlyphController(context: Context) : AutoCloseable {
             }
         }
 
+        if (backend == Backend.GALAXIAN_SYSFS) {
+            writeGalaxianState(0)
+        }
+
         ready = false
         binder = null
         binding = false
+        backend = Backend.NONE
 
         safeUnbind()
 
