@@ -13,8 +13,8 @@ android {
         applicationId = "com.jackson4rocks.oneglyph"
         minSdk = 35
         targetSdk = 36
-        versionCode = 100
-        versionName = "1.0"
+        versionCode = 101
+        versionName = "1.1"
     }
 
     buildTypes {
