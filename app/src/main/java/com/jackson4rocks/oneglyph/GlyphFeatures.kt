@@ -225,7 +225,37 @@ class PatternStore(context: Context) {
 }
 
 class GlyphMediaSessionService :
-    NotificationListenerService()
+    NotificationListenerService() {
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+
+        // NotificationListenerService is system-bound. Keeping the background
+        // process hosted by this service gives Nothing OS a system binding to
+        // the same process that owns our persistent foreground Glyph service.
+        android.util.Log.d(
+            "OneGlyph",
+            "Media Access connected; anchoring background process."
+        )
+
+        if (
+            PatternStore(this).appEnabled()
+        ) {
+            GlyphBackgroundService.ensureRunning(
+                this
+            )
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        android.util.Log.w(
+            "OneGlyph",
+            "Media Access disconnected."
+        )
+
+        super.onListenerDisconnected()
+    }
+}
 
 class MediaPlaybackWatcher(
     context: Context,
