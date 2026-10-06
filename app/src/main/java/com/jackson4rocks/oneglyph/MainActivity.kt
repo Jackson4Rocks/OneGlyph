@@ -791,33 +791,53 @@ private fun hasMediaAccess(
         }
 }
 
+private fun isIgnoringBatteryOptimizations(
+    context: Context
+): Boolean {
+    if (
+        android.os.Build.VERSION.SDK_INT < 23
+    ) {
+        return true
+    }
+
+    val powerManager =
+        context.getSystemService(
+            android.os.PowerManager::class.java
+        ) ?: return false
+
+    return powerManager.isIgnoringBatteryOptimizations(
+        context.packageName
+    )
+}
+
 private fun requestBackgroundRecoveryAccess(
     context: Context
 ) {
     if (
-        android.os.Build.VERSION.SDK_INT >= 31
+        android.os.Build.VERSION.SDK_INT < 23 ||
+        isIgnoringBatteryOptimizations(context)
     ) {
-        val alarm =
-            context.getSystemService(
-                android.app.AlarmManager::class.java
-            )
+        return
+    }
 
-        if (
-            alarm != null &&
-            !alarm.canScheduleExactAlarms()
-        ) {
-            try {
-                context.startActivity(
-                    Intent(
-                        Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                        Uri.parse(
-                            "package:" +
-                                context.packageName
-                        )
-                    )
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse(
+                    "package:" +
+                        context.packageName
                 )
-            } catch (_: Throwable) {
-            }
+            )
+        )
+    } catch (_: Throwable) {
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                )
+            )
+        } catch (_: Throwable) {
         }
     }
 }
