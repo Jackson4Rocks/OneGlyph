@@ -122,6 +122,25 @@ class PatternStore(context: Context) {
             .apply()
     }
 
+    fun backgroundMode(): String =
+        prefs.getString(
+            "background_mode",
+            "none"
+        ).orEmpty().ifBlank {
+            "none"
+        }
+
+    fun setBackgroundMode(
+        mode: String
+    ) {
+        prefs.edit()
+            .putString(
+                "background_mode",
+                mode
+            )
+            .commit()
+    }
+
     fun chargingEnabled(): Boolean =
         prefs.getBoolean("charging_enabled", true)
 
