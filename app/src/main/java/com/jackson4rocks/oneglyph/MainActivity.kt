@@ -141,11 +141,6 @@ private fun OneGlyphApp() {
             PatternStore(context)
         }
 
-    val controller =
-        remember {
-            GlyphController(context)
-        }
-
     var page by remember {
         mutableStateOf("HOME")
     }
@@ -310,21 +305,9 @@ private fun OneGlyphApp() {
             }
         }
 
-    DisposableEffect(
-        controller,
-        playbackWatcher
-    ) {
-        controller.setStatusListener {
-            connected =
-                controller.isReady()
-        }
-
+    DisposableEffect(playbackWatcher) {
         onDispose {
-            controller.setStatusListener(
-                null
-            )
             playbackWatcher.close()
-            controller.close()
         }
     }
 
@@ -352,7 +335,7 @@ private fun OneGlyphApp() {
             beatSyncOn = false
             playback = null
             toyOn = false
-            controller.stopPattern()
+            GlyphBackgroundService.stopPattern(context)
             GlyphBackgroundService.stopService(
                 context
             )
@@ -394,7 +377,7 @@ private fun OneGlyphApp() {
     LaunchedEffect(Unit) {
         while (true) {
             connected =
-                controller.isReady()
+                GlyphBackgroundService.isGlyphReady(context)
 
             audioAccess =
                 hasAudioAccess(context)
@@ -509,7 +492,6 @@ private fun OneGlyphApp() {
                     "HOME" -> {
                         HomePage(
                             context = context,
-                            controller = controller,
                             enabled = appEnabled,
                             connected = connected,
                             beatSyncOn = beatSyncOn,
@@ -571,13 +553,16 @@ private fun OneGlyphApp() {
                                     appEnabled &&
                                     connected
                                 ) {
-                                    controller.playPattern(it)
+                                    GlyphBackgroundService.playPattern(
+                                        context,
+                                        it
+                                    )
                                     status =
                                         "Playing pattern."
                                 }
                             },
                             onStop = {
-                                controller.stopPattern()
+                                GlyphBackgroundService.stopPattern(context)
                                 status =
                                     "Glyph stopped."
                             },
@@ -588,7 +573,6 @@ private fun OneGlyphApp() {
                                 ) {
                                     CameraCountdown.start(
                                         context,
-                                        controller,
                                         cameraSeconds
                                     )
                                     status =
@@ -600,7 +584,6 @@ private fun OneGlyphApp() {
 
                     "COMPOSER" -> {
                         ComposerPage(
-                            controller = controller,
                             enabled = appEnabled,
                             connected = connected,
                             steps = composer,
@@ -637,7 +620,7 @@ private fun OneGlyphApp() {
                                         "none"
                                     )
                                     beatSyncOn = false
-                                    controller.stopPattern()
+                                    GlyphBackgroundService.stopPattern(context)
                                     GlyphBackgroundService.stopService(
                                         context
                                     )
@@ -721,7 +704,7 @@ private fun OneGlyphApp() {
                                 GlyphBackgroundService.stopToy(
                                     context
                                 )
-                                controller.stopPattern()
+                                GlyphBackgroundService.stopPattern(context)
                                 status =
                                     "Dot toy off."
                             } else {
@@ -1023,7 +1006,6 @@ private fun TopNavigation(
 @Composable
 private fun HomePage(
     context: Context,
-    controller: GlyphController,
     enabled: Boolean,
     connected: Boolean,
     beatSyncOn: Boolean,
@@ -1300,7 +1282,8 @@ private fun HomePage(
                 enabled &&
                     connected,
             onClick = {
-                controller.playPattern(
+                GlyphBackgroundService.playPattern(
+                    context,
                     listOf(
                         GlyphStep(
                             brightness,
@@ -1319,7 +1302,6 @@ private fun HomePage(
 
 @Composable
 private fun ComposerPage(
-    controller: GlyphController,
     enabled: Boolean,
     connected: Boolean,
     steps: MutableList<GlyphStep>,
@@ -1545,7 +1527,8 @@ private fun ComposerPage(
                     enabled &&
                         connected,
                 onClick = {
-                    controller.playPattern(
+                    GlyphBackgroundService.playPattern(
+                        context,
                         steps,
                         2
                     )
