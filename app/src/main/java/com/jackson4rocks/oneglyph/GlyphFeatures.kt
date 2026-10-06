@@ -860,6 +860,68 @@ object GlyphAction {
 object CameraCountdown {
     fun start(
         context: Context,
+        seconds: Int
+    ) {
+        val store =
+            PatternStore(context)
+
+        if (!store.appEnabled()) {
+            return
+        }
+
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.MediaStore
+                        .INTENT_ACTION_STILL_IMAGE_CAMERA
+                )
+            )
+        } catch (_: Throwable) {
+            return
+        }
+
+        val count =
+            seconds.coerceIn(3, 10)
+
+        val steps =
+            buildList {
+                repeat(count) {
+                    add(
+                        GlyphStep(
+                            brightness = 2500,
+                            durationMs = 105L
+                        )
+                    )
+                    add(
+                        GlyphStep(
+                            brightness = 0,
+                            durationMs = 595L
+                        )
+                    )
+                }
+
+                add(
+                    GlyphStep(
+                        brightness = 4095,
+                        durationMs = 180L
+                    )
+                )
+                add(
+                    GlyphStep(
+                        brightness = 0,
+                        durationMs = 250L
+                    )
+                )
+            }
+
+        GlyphBackgroundService.playPattern(
+            context,
+            steps
+        )
+    }
+
+    fun start(
+        context: Context,
         controller: GlyphController,
         seconds: Int
     ) {

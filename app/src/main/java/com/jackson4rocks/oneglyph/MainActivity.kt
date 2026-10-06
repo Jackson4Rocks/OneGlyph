@@ -584,6 +584,7 @@ private fun OneGlyphApp() {
 
                     "COMPOSER" -> {
                         ComposerPage(
+                            context = context,
                             enabled = appEnabled,
                             connected = connected,
                             steps = composer,
@@ -1302,6 +1303,7 @@ private fun HomePage(
 
 @Composable
 private fun ComposerPage(
+    context: Context,
     enabled: Boolean,
     connected: Boolean,
     steps: MutableList<GlyphStep>,
