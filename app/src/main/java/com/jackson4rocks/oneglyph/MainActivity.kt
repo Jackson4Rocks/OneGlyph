@@ -1375,7 +1375,8 @@ private fun ComposerPage(
                     )
 
                     Text(
-                        "${step.durationMs} ms",
+                        "${step.durationMs} ms • " +
+                            "${step.brightness * 100 / 4095}%",
                         fontFamily =
                             NDotFamily,
                         fontSize = 9.sp,
@@ -1383,6 +1384,15 @@ private fun ComposerPage(
                             colors.onSurface
                     )
                 }
+
+                Text(
+                    "Brightness for this blink",
+                    fontFamily =
+                        NDotFamily,
+                    fontSize = 10.sp,
+                    color =
+                        colors.onSurface
+                )
 
                 Slider(
                     value =
@@ -1407,6 +1417,19 @@ private fun ComposerPage(
                     enabled =
                         enabled &&
                             connected
+                )
+
+                SmallNote(
+                    "Changes the Glyph brightness of this blink only; it does not change your screen brightness."
+                )
+
+                Text(
+                    "Duration",
+                    fontFamily =
+                        NDotFamily,
+                    fontSize = 10.sp,
+                    color =
+                        colors.onSurface
                 )
 
                 Row(
