@@ -823,50 +823,23 @@ object GlyphAction {
         context: Context,
         steps: List<GlyphStep>
     ) {
-        val store =
-            PatternStore(context)
-
-        if (!store.appEnabled()) {
+        if (!PatternStore(context).appEnabled()) {
             return
         }
 
-        val controller =
-            GlyphController(
-                context.applicationContext
-            )
-
-        try {
-            if (
-                !controller.awaitReady(8_000L)
-            ) {
-                return
-            }
-
-            controller.playPattern(
-                steps
-            )
-
-            delay(
-                steps.sumOf {
-                    it.durationMs
-                } + 100L
-            )
-        } finally {
-            controller.close()
-        }
+        GlyphBackgroundService.playPattern(
+            context,
+            steps
+        )
     }
 }
 
 object CameraCountdown {
     fun start(
         context: Context,
-        controller: GlyphController,
         seconds: Int
     ) {
-        val store =
-            PatternStore(context)
-
-        if (!store.appEnabled()) {
+        if (!PatternStore(context).appEnabled()) {
             return
         }
 
@@ -881,92 +854,10 @@ object CameraCountdown {
             return
         }
 
-        val duration =
-            seconds.coerceIn(3, 10) * 1000L
-
-        CoroutineScope(
-            Dispatchers.IO
-        ).launch {
-            val start =
-                SystemClock
-                    .uptimeMillis()
-
-            while (
-                SystemClock.uptimeMillis() -
-                    start <
-                    duration
-            ) {
-                val elapsed =
-                    (
-                        SystemClock.uptimeMillis() -
-                            start
-                    ).coerceAtLeast(
-                        0L
-                    )
-
-                val progress =
-                    (
-                        elapsed.toFloat() /
-                            duration
-                    ).coerceIn(
-                        0f,
-                        0.999f
-                    )
-
-                val cycleMs =
-                    (
-                        700L -
-                            progress * 560L
-                    ).toLong().coerceAtLeast(
-                        140L
-                    )
-
-                val onMs =
-                    (
-                        105L -
-                            progress * 45L
-                    ).toLong().coerceAtLeast(
-                        55L
-                    )
-
-                controller.playPattern(
-                    listOf(
-                        GlyphStep(
-                            2500 +
-                                (1500 * progress)
-                                    .toInt(),
-                            onMs
-                        ),
-                        GlyphStep(
-                            0,
-                            (
-                                cycleMs -
-                                    onMs
-                            ).coerceAtLeast(
-                                55L
-                            )
-                        )
-                    )
-                )
-
-                delay(
-                    cycleMs
-                )
-            }
-
-            controller.playPattern(
-                listOf(
-                    GlyphStep(
-                        4095,
-                        180
-                    ),
-                    GlyphStep(
-                        0,
-                        250
-                    )
-                )
-            )
-        }
+        GlyphBackgroundService.startCameraCountdown(
+            context,
+            seconds
+        )
     }
 }
 

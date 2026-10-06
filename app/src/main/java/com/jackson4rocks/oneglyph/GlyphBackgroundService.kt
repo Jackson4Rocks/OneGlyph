@@ -12,6 +12,14 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class GlyphBackgroundService : Service() {
 
@@ -72,6 +80,22 @@ class GlyphBackgroundService : Service() {
 
         private const val MODE_MUSIC_SYNC =
             "music_sync"
+
+        private const val ACTION_PLAY_PATTERN =
+            "com.jackson4rocks.oneglyph.action.PLAY_PATTERN"
+
+        private const val ACTION_STOP_PATTERN =
+            "com.jackson4rocks.oneglyph.action.STOP_PATTERN"
+
+        private const val ACTION_CAMERA_COUNTDOWN =
+            "com.jackson4rocks.oneglyph.action.CAMERA_COUNTDOWN"
+
+        private const val EXTRA_PATTERN = "pattern"
+        private const val EXTRA_REPEAT = "repeat"
+        private const val EXTRA_SECONDS = "seconds"
+
+        private const val READY_PREF = "background_status"
+        private const val READY_KEY = "glyph_ready"
 
         fun isToyEnabled(
             context: Context
@@ -159,6 +183,74 @@ class GlyphBackgroundService : Service() {
                 )
             )
         }
+
+        fun playPattern(
+            context: Context,
+            steps: List<GlyphStep>,
+            repeat: Int = 1
+        ) {
+            val encoded =
+                steps.joinToString("|") {
+                    it.brightness.toString() +
+                        "," +
+                        it.durationMs
+                }
+
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                )
+                    .setAction(ACTION_PLAY_PATTERN)
+                    .putExtra(EXTRA_PATTERN, encoded)
+                    .putExtra(
+                        EXTRA_REPEAT,
+                        repeat.coerceIn(1, 32)
+                    )
+            )
+        }
+
+        fun stopPattern(
+            context: Context
+        ) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                ).setAction(ACTION_STOP_PATTERN)
+            )
+        }
+
+        fun startCameraCountdown(
+            context: Context,
+            seconds: Int
+        ) {
+            start(
+                context,
+                Intent(
+                    context,
+                    GlyphBackgroundService::class.java
+                )
+                    .setAction(ACTION_CAMERA_COUNTDOWN)
+                    .putExtra(
+                        EXTRA_SECONDS,
+                        seconds.coerceIn(3, 10)
+                    )
+            )
+        }
+
+        fun isGlyphReady(
+            context: Context
+        ): Boolean =
+            context.getSharedPreferences(
+                READY_PREF,
+                Context.MODE_PRIVATE
+            ).getBoolean(
+                READY_KEY,
+                false
+            )
 
         fun stopService(
             context: Context
@@ -437,6 +529,15 @@ class GlyphBackgroundService : Service() {
     private var musicSync:
         BeatSyncController? = null
 
+    private var cameraJob:
+        Job? = null
+
+    private val serviceScope =
+        CoroutineScope(
+            SupervisorJob() +
+                Dispatchers.Default
+        )
+
     private val heartbeatHandler =
         android.os.Handler(
             android.os.Looper.getMainLooper()
@@ -473,6 +574,25 @@ class GlyphBackgroundService : Service() {
                 applicationContext
             )
 
+        getSharedPreferences(
+            READY_PREF,
+            MODE_PRIVATE
+        ).edit()
+            .putBoolean(
+                READY_KEY,
+                false
+            )
+            .apply()
+
+        controller.setStatusListener {
+            publishReadyState()
+        }
+
+        // GlyphController starts connecting from its constructor. It can
+        // become ready before the listener above is installed, so publish
+        // the current state once as well.
+        publishReadyState()
+
         currentMode =
             readMode(this)
 
@@ -498,6 +618,7 @@ class GlyphBackgroundService : Service() {
         startId: Int
     ): Int {
         writeHeartbeat()
+        publishReadyState()
 
         if (
             !PatternStore(this).appEnabled()
@@ -542,6 +663,35 @@ class GlyphBackgroundService : Service() {
                         MODE_NONE
                     )
                 }
+            }
+
+            ACTION_PLAY_PATTERN -> {
+                val encoded =
+                    intent?.getStringExtra(
+                        EXTRA_PATTERN
+                    ).orEmpty()
+
+                controller.playPattern(
+                    decodePattern(encoded),
+                    intent?.getIntExtra(
+                        EXTRA_REPEAT,
+                        1
+                    ) ?: 1
+                )
+            }
+
+            ACTION_STOP_PATTERN -> {
+                cameraJob?.cancel()
+                controller.stopPattern()
+            }
+
+            ACTION_CAMERA_COUNTDOWN -> {
+                startCameraCountdownLoop(
+                    intent?.getIntExtra(
+                        EXTRA_SECONDS,
+                        5
+                    ) ?: 5
+                )
             }
 
             ACTION_KEEP_ALIVE,
@@ -675,6 +825,105 @@ class GlyphBackgroundService : Service() {
         controller.stopPattern()
     }
 
+    private fun decodePattern(
+        encoded: String
+    ): List<GlyphStep> =
+        encoded
+            .split("|")
+            .mapNotNull { item ->
+                val parts = item.split(",")
+
+                if (parts.size != 2) {
+                    return@mapNotNull null
+                }
+
+                val brightness =
+                    parts[0].toIntOrNull()
+                        ?: return@mapNotNull null
+
+                val duration =
+                    parts[1].toLongOrNull()
+                        ?: return@mapNotNull null
+
+                GlyphStep(
+                    brightness.coerceIn(0, 4095),
+                    duration.coerceIn(40L, 3000L)
+                )
+            }
+            .take(32)
+
+    private fun startCameraCountdownLoop(
+        seconds: Int
+    ) {
+        cameraJob?.cancel()
+
+        val duration =
+            seconds.coerceIn(3, 10) * 1000L
+
+        cameraJob =
+            serviceScope.launch {
+                val start =
+                    SystemClock.elapsedRealtime()
+
+                while (
+                    isActive &&
+                    SystemClock.elapsedRealtime() -
+                        start <
+                        duration
+                ) {
+                    val elapsed =
+                        (
+                            SystemClock.elapsedRealtime() -
+                                start
+                        ).coerceAtLeast(0L)
+
+                    val progress =
+                        (
+                            elapsed.toFloat() /
+                                duration
+                        ).coerceIn(0f, 0.999f)
+
+                    val cycleMs =
+                        (
+                            700L -
+                                progress * 560L
+                        ).toLong().coerceAtLeast(140L)
+
+                    val onMs =
+                        (
+                            105L -
+                                progress * 45L
+                        ).toLong().coerceAtLeast(55L)
+
+                    controller.playPattern(
+                        listOf(
+                            GlyphStep(
+                                2500 +
+                                    (1500 * progress).toInt(),
+                                onMs
+                            ),
+                            GlyphStep(
+                                0,
+                                (cycleMs - onMs)
+                                    .coerceAtLeast(55L)
+                            )
+                        )
+                    )
+
+                    delay(cycleMs)
+                }
+
+                if (isActive) {
+                    controller.playPattern(
+                        listOf(
+                            GlyphStep(4095, 180),
+                            GlyphStep(0, 250)
+                        )
+                    )
+                }
+            }
+    }
+
     private fun startMusicSyncLoop() {
         musicSync?.start()
             ?: run {
@@ -786,6 +1035,9 @@ class GlyphBackgroundService : Service() {
             heartbeatRunnable
         )
 
+        cameraJob?.cancel()
+        cameraJob = null
+
         try {
             if (
                 currentMode != MODE_NONE
@@ -801,10 +1053,34 @@ class GlyphBackgroundService : Service() {
 
             controller.stopPattern()
             controller.close()
+
+            getSharedPreferences(
+                READY_PREF,
+                MODE_PRIVATE
+            ).edit()
+                .putBoolean(
+                    READY_KEY,
+                    false
+                )
+                .apply()
         } catch (_: Exception) {
         }
 
+        serviceScope.cancel()
+
         super.onDestroy()
+    }
+
+    private fun publishReadyState() {
+        getSharedPreferences(
+            READY_PREF,
+            MODE_PRIVATE
+        ).edit()
+            .putBoolean(
+                READY_KEY,
+                controller.isReady()
+            )
+            .apply()
     }
 
     private fun writeHeartbeat() {

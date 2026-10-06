@@ -584,6 +584,7 @@ private fun OneGlyphApp() {
 
                     "COMPOSER" -> {
                         ComposerPage(
+                            context = context,
                             enabled = appEnabled,
                             connected = connected,
                             steps = composer,
@@ -1302,6 +1303,7 @@ private fun HomePage(
 
 @Composable
 private fun ComposerPage(
+    context: Context,
     enabled: Boolean,
     connected: Boolean,
     steps: MutableList<GlyphStep>,
@@ -1831,6 +1833,29 @@ private fun SettingsPage(
                     )
                 )
             }
+        )
+    }
+
+    UserCard {
+        Text(
+            "IDEA CONTRIBUTOR",
+            fontFamily = NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "saran_archiz",
+            fontFamily = NDotFamily,
+            fontSize = 20.sp,
+            color = colors.onSurface
+        )
+
+        SmallNote(
+            "From Nothing Community — thanks for the idea that helped inspire OneGlyph."
         )
     }
 }
