@@ -361,7 +361,13 @@ private fun OneGlyphApp() {
             GlyphBackgroundService.startMusicSync(
                 context
             )
-        } else if (!beatSyncOn) {
+        } else if (
+            !beatSyncOn &&
+            appEnabled &&
+            GlyphBackgroundService.isMusicSyncEnabled(
+                context
+            )
+        ) {
             GlyphBackgroundService.stopMusicSync(
                 context
             )
