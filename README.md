@@ -153,3 +153,24 @@ Made by **Leon Sony**
 [GitHub](https://github.com/Jackson4Rocks)
 
 </div>
+
+
+## Galaxian custom-ROM backend
+
+OneGlyph includes a fallback backend for the Nothing Phone (3a) Lite / Galaxian custom-ROM kernel interface:
+
+```text
+/sys/class/leds/noth_leds/state
+```
+
+The Galaxian kernel driver accepts:
+
+- `0` — off
+- `1` — solid on
+- values greater than `1` — kernel-managed blinking, with the value interpreted as a period in milliseconds
+
+The app first tries the normal Android/Nothing Glyph service. When that service is unavailable, it detects the Galaxian sysfs node and uses it instead. It attempts a direct sysfs write first and falls back to `su -c` on rooted devices such as KernelSU/Magisk setups.
+
+On the tested custom ROM, `/sys/class/leds/vibrator/brightness` can also illuminate the Glyph because the vibrator and Glyph paths share the PMIC regulator. OneGlyph deliberately uses `noth_leds/state` as the primary custom-ROM interface so it does not intentionally drive the vibrator API.
+
+The Galaxian sysfs backend is binary: it controls the Glyph as off/on rather than exposing the stock service's full brightness scale. Continuous fast-flash effects use the kernel's built-in blinking support to avoid spawning a root shell for every transition.
