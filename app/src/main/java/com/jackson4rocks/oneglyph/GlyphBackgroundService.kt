@@ -328,46 +328,57 @@ class GlyphBackgroundService : Service() {
         private fun readMode(
             context: Context
         ): String {
+            val canonical =
+                PatternStore(
+                    context.applicationContext
+                ).backgroundMode()
+
+            if (
+                canonical == MODE_TOY ||
+                canonical == MODE_MUSIC_SYNC ||
+                canonical == MODE_NONE
+            ) {
+                return canonical
+            }
+
             val prefs =
                 context.getSharedPreferences(
                     PREFS,
                     Context.MODE_PRIVATE
                 )
 
-            val stored =
-                prefs.getString(
-                    MODE,
-                    null
-                )
-
-            if (!stored.isNullOrBlank()) {
-                return stored
-            }
-
-            // Migrate the old Dot Toy preference once.
-            return if (
+            if (
                 prefs.getBoolean(
                     LEGACY_TOY_ENABLED,
                     false
                 )
             ) {
-                prefs.edit()
-                    .putString(
-                        MODE,
-                        MODE_TOY
-                    )
-                    .apply()
+                saveMode(
+                    context,
+                    MODE_TOY
+                )
 
-                MODE_TOY
-            } else {
-                MODE_NONE
+                return MODE_TOY
             }
+
+            saveMode(
+                context,
+                MODE_NONE
+            )
+
+            MODE_NONE
         }
 
         private fun saveMode(
             context: Context,
             mode: String
         ) {
+            PatternStore(
+                context.applicationContext
+            ).setBackgroundMode(
+                mode
+            )
+
             context.getSharedPreferences(
                 PREFS,
                 Context.MODE_PRIVATE
@@ -381,7 +392,7 @@ class GlyphBackgroundService : Service() {
                     LEGACY_TOY_ENABLED,
                     mode == MODE_TOY
                 )
-                .apply()
+                .commit()
         }
 
         private fun start(
