@@ -566,21 +566,6 @@ class GlyphController(context: Context) : AutoCloseable {
     ) {
         stopPatternOnly()
 
-        if (backend == Backend.GALAXIAN_SYSFS) {
-            effectJob =
-                scope.launch {
-                    if (awaitReady()) {
-                        writeGalaxianState(
-                            onMs.coerceIn(
-                                GALAXIAN_BLINK_MIN_MS,
-                                GALAXIAN_BLINK_MAX_MS
-                            ).toInt()
-                        )
-                    }
-                }
-            return
-        }
-
         effectJob =
             scope.launch {
                 if (
@@ -589,6 +574,22 @@ class GlyphController(context: Context) : AutoCloseable {
                     postStatus(
                         "GLYPH NOT READY"
                     )
+                    return@launch
+                }
+
+                if (backend == Backend.GALAXIAN_SYSFS) {
+                    if (
+                        !writeGalaxianState(
+                            onMs.coerceIn(
+                                GALAXIAN_BLINK_MIN_MS,
+                                GALAXIAN_BLINK_MAX_MS
+                            ).toInt()
+                        )
+                    ) {
+                        postStatus(
+                            "GALAXIAN GLYPH WRITE FAILED • ROOT REQUIRED"
+                        )
+                    }
                     return@launch
                 }
 
