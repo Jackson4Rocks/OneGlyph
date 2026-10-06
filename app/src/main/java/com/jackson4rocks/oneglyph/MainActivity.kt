@@ -168,7 +168,10 @@ private fun OneGlyphApp() {
     }
 
     var beatSyncOn by remember {
-        mutableStateOf(false)
+        mutableStateOf(
+            GlyphBackgroundService
+                .isMusicSyncEnabled(context)
+        )
     }
 
     var connected by remember {
@@ -225,17 +228,46 @@ private fun OneGlyphApp() {
 
     var toyOn by remember {
         mutableStateOf(
-            context
-                .getSharedPreferences(
-                    "oneglyph_background",
-                    Context.MODE_PRIVATE
-                )
-                .getBoolean(
-                    "toy_enabled",
-                    false
-                )
+            GlyphBackgroundService
+                .isToyEnabled(context)
         )
     }
+
+    val playbackWatcher =
+        remember {
+            MediaPlaybackWatcher(
+                context,
+                onChanged = { info ->
+                    playback = info
+
+                    status =
+                        when {
+                            info == null ->
+                                if (beatSyncOn) {
+                                    "Waiting for music…"
+                                } else {
+                                    status
+                                }
+
+                            info.isPlaying &&
+                                beatSyncOn ->
+                                "Following the beat."
+
+                            info.isPlaying ->
+                                "Music is playing."
+
+                            else ->
+                                "Paused — Glyph is off."
+                        }
+                },
+                onAccessError = {
+                    if (beatSyncOn) {
+                        status =
+                            "Turn on Media Access in Settings."
+                    }
+                }
+            )
+        }
 
     val notificationPermission =
         rememberLauncherForActivityResult(
@@ -262,42 +294,16 @@ private fun OneGlyphApp() {
                 openMediaAccess(context)
             } else {
                 mediaAccess = true
+                toyOn = false
                 beatSyncOn = true
                 status =
                     "Waiting for music…"
             }
         }
 
-    val beatSync =
-        remember {
-            BeatSyncController(
-                context,
-                controller,
-                onState = { info ->
-                    playback = info
-
-                    status =
-                        when {
-                            info == null ->
-                                "Play music to start syncing."
-
-                            info.isPlaying ->
-                                "Following the beat."
-
-                            else ->
-                                "Paused — Glyph is off."
-                        }
-                },
-                onError = { message ->
-                    beatSyncOn = false
-                    status = message
-                }
-            )
-        }
-
     DisposableEffect(
         controller,
-        beatSync
+        playbackWatcher
     ) {
         controller.setStatusListener {
             connected =
@@ -308,7 +314,7 @@ private fun OneGlyphApp() {
             controller.setStatusListener(
                 null
             )
-            beatSync.close()
+            playbackWatcher.close()
             controller.close()
         }
     }
@@ -335,7 +341,6 @@ private fun OneGlyphApp() {
     LaunchedEffect(appEnabled) {
         if (!appEnabled) {
             beatSyncOn = false
-            beatSync.close()
             playback = null
             toyOn = false
             controller.stopPattern()
@@ -353,11 +358,28 @@ private fun OneGlyphApp() {
             beatSyncOn &&
             appEnabled
         ) {
-            beatSync.start()
-        } else {
-            beatSync.close()
-            playback = null
-            controller.stopPattern()
+            GlyphBackgroundService.startMusicSync(
+                context
+            )
+        } else if (!beatSyncOn) {
+            GlyphBackgroundService.stopMusicSync(
+                context
+            )
+        }
+    }
+
+    LaunchedEffect(
+        appEnabled,
+        mediaAccess
+    ) {
+        playbackWatcher.close()
+        playback = null
+
+        if (
+            appEnabled &&
+            mediaAccess
+        ) {
+            playbackWatcher.start()
         }
     }
 
@@ -373,10 +395,10 @@ private fun OneGlyphApp() {
                 hasMediaAccess(context)
 
             if (
-                beatSyncOn &&
-                appEnabled
+                appEnabled &&
+                mediaAccess
             ) {
-                beatSync.refresh()
+                playbackWatcher.refresh()
             }
 
             delay(1000L)
@@ -510,6 +532,7 @@ private fun OneGlyphApp() {
                                         context
                                     )
                                 } else {
+                                    toyOn = false
                                     beatSyncOn = true
                                     status =
                                         "Waiting for music…"
@@ -674,7 +697,6 @@ private fun OneGlyphApp() {
                                     "Dot toy off — background mode stays on."
                             } else {
                                 beatSyncOn = false
-                                beatSync.close()
                                 toyOn = true
                                 GlyphBackgroundService.startToy(
                                     context
