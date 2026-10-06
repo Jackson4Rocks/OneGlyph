@@ -926,7 +926,7 @@ class GlyphBackgroundService : Service() {
             }
     }
 
-    private fun startMusicSyncLoop()
+    private fun startMusicSyncLoop() {
         musicSync?.start()
             ?: run {
                 musicSync =
