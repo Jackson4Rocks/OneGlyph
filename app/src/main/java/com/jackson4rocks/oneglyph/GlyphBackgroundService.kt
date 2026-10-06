@@ -383,7 +383,7 @@ class GlyphBackgroundService : Service() {
                 MODE_NONE
             )
 
-            MODE_NONE
+            return MODE_NONE
         }
 
         private fun saveMode(
