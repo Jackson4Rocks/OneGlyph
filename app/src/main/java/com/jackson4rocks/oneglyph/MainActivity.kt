@@ -358,6 +358,9 @@ private fun OneGlyphApp() {
             beatSyncOn &&
             appEnabled
         ) {
+            requestBackgroundRecoveryAccess(
+                context
+            )
             GlyphBackgroundService.startMusicSync(
                 context
             )
@@ -704,6 +707,9 @@ private fun OneGlyphApp() {
                             } else {
                                 beatSyncOn = false
                                 toyOn = true
+                                requestBackgroundRecoveryAccess(
+                                    context
+                                )
                                 GlyphBackgroundService.startToy(
                                     context
                                 )
@@ -760,6 +766,37 @@ private fun hasMediaAccess(
         .any {
             it == component
         }
+}
+
+private fun requestBackgroundRecoveryAccess(
+    context: Context
+) {
+    if (
+        android.os.Build.VERSION.SDK_INT >= 31
+    ) {
+        val alarm =
+            context.getSystemService(
+                android.app.AlarmManager::class.java
+            )
+
+        if (
+            alarm != null &&
+            !alarm.canScheduleExactAlarms()
+        ) {
+            try {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                        Uri.parse(
+                            "package:" +
+                                context.packageName
+                        )
+                    )
+                )
+            } catch (_: Throwable) {
+            }
+        }
+    }
 }
 
 private fun openMediaAccess(
