@@ -335,8 +335,7 @@ class GlyphBackgroundService : Service() {
 
             if (
                 canonical == MODE_TOY ||
-                canonical == MODE_MUSIC_SYNC ||
-                canonical == MODE_NONE
+                canonical == MODE_MUSIC_SYNC
             ) {
                 return canonical
             }
@@ -346,6 +345,24 @@ class GlyphBackgroundService : Service() {
                     PREFS,
                     Context.MODE_PRIVATE
                 )
+
+            val oldMode =
+                prefs.getString(
+                    MODE,
+                    null
+                )
+
+            if (
+                oldMode == MODE_TOY ||
+                oldMode == MODE_MUSIC_SYNC
+            ) {
+                saveMode(
+                    context,
+                    oldMode
+                )
+
+                return oldMode
+            }
 
             if (
                 prefs.getBoolean(
