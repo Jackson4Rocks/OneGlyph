@@ -585,16 +585,13 @@ class GlyphBackgroundService : Service() {
             .apply()
 
         controller.setStatusListener {
-            getSharedPreferences(
-                READY_PREF,
-                MODE_PRIVATE
-            ).edit()
-                .putBoolean(
-                    READY_KEY,
-                    controller.isReady()
-                )
-                .apply()
+            publishReadyState()
         }
+
+        // GlyphController starts connecting from its constructor. It can
+        // become ready before the listener above is installed, so publish
+        // the current state once as well.
+        publishReadyState()
 
         currentMode =
             readMode(this)
@@ -621,6 +618,7 @@ class GlyphBackgroundService : Service() {
         startId: Int
     ): Int {
         writeHeartbeat()
+        publishReadyState()
 
         if (
             !PatternStore(this).appEnabled()
@@ -1071,6 +1069,18 @@ class GlyphBackgroundService : Service() {
         serviceScope.cancel()
 
         super.onDestroy()
+    }
+
+    private fun publishReadyState() {
+        getSharedPreferences(
+            READY_PREF,
+            MODE_PRIVATE
+        ).edit()
+            .putBoolean(
+                READY_KEY,
+                controller.isReady()
+            )
+            .apply()
     }
 
     private fun writeHeartbeat() {
