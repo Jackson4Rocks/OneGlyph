@@ -5,14 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Parcel
 import android.os.SystemClock
 import android.util.Log
-import java.io.File
-import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,77 +22,49 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
+/**
+ * Stock-only Glyph controller for Nothing Phone (3a) Lite.
+ *
+ * Talks exclusively to the stock Nothing Glyph service
+ * (`com.nothing.thirdparty`) via Binder. No sysfs, no `su`
+ * fallback, no custom-ROM paths.
+ */
 class GlyphController(context: Context) : AutoCloseable {
-    private enum class Backend {
-        NONE,
-        STOCK,
-        GALAXIAN_SYSFS
-    }
     companion object {
-        private const val TAG =
-            "OneGlyph"
+        private const val TAG = "OneGlyph"
 
-        private const val NOTHING_PACKAGE =
-            "com.nothing.thirdparty"
-
-        private const val NOTHING_SERVICE =
-            "com.nothing.thirdparty.GlyphService"
-
-        private const val BIND_ACTION =
-            "com.nothing.thirdparty.bind_glyphservice"
-
-        private const val DESCRIPTOR =
-            "com.nothing.thirdparty.IGlyphService"
+        private const val NOTHING_PACKAGE = "com.nothing.thirdparty"
+        private const val NOTHING_SERVICE = "com.nothing.thirdparty.GlyphService"
+        private const val BIND_ACTION = "com.nothing.thirdparty.bind_glyphservice"
+        private const val DESCRIPTOR = "com.nothing.thirdparty.IGlyphService"
 
         private const val TX_SET_FRAME_COLORS = 1
         private const val TX_OPEN_SESSION = 2
         private const val TX_CLOSE_SESSION = 3
         private const val TX_REGISTER_SDK = 5
 
-        private const val API_KEY =
-            "test"
+        private const val API_KEY = "test"
 
-        private const val GALAXIAN_MODEL =
-            "A001T"
+        private const val FALLBACK_MODEL = "A001T"
+        const val MAX_BRIGHTNESS = 4095
 
-        private const val MAX_BRIGHTNESS =
-            4095
-
-        private const val GALAXIAN_STATE_PATH =
-            "/sys/class/leds/noth_leds/state"
-
-        private const val GALAXIAN_BLINK_MIN_MS =
-            20L
-
-        private const val GALAXIAN_BLINK_MAX_MS =
-            60_000L
-
-        private const val CONNECT_RETRY_MS =
-            500L
-
-        private const val READY_TIMEOUT_MS =
-            8_000L
-
-        private const val RECONNECT_COOLDOWN_MS =
-            1_500L
+        private const val CONNECT_RETRY_MS = 500L
+        private const val READY_TIMEOUT_MS = 8_000L
+        private const val RECONNECT_COOLDOWN_MS = 1_500L
     }
 
-    private val appContext =
-        context.applicationContext
+    private val appContext = context.applicationContext
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val scope =
-        CoroutineScope(
-            SupervisorJob() +
-                Dispatchers.IO
-        )
+    private val targetDevice: String =
+        Build.MODEL.ifBlank { FALLBACK_MODEL }
 
     @Volatile
-    private var readySignal =
-        CompletableDeferred<Unit>()
+    private var readySignal = CompletableDeferred<Unit>()
 
     @Volatile
-    private var binder:
-        IBinder? = null
+    private var binder: IBinder? = null
 
     @Volatile
     private var ready = false
@@ -109,143 +79,60 @@ class GlyphController(context: Context) : AutoCloseable {
     private var closed = false
 
     @Volatile
-    private var lastConnectAttempt =
-        0L
+    private var lastConnectAttempt = 0L
 
-    private var effectJob:
-        Job? = null
-
-    private var statusListener:
-        ((String) -> Unit)? = null
-
-    @Volatile
-    private var backend =
-        Backend.NONE
+    private var effectJob: Job? = null
+    private var statusListener: ((String) -> Unit)? = null
 
     private val serviceConnection =
         object : ServiceConnection {
-            override fun onServiceConnected(
-                name: ComponentName,
-                service: IBinder
-            ) {
-                if (closed) {
-                    return
-                }
+            override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                if (closed) return
 
                 binder = service
                 binding = false
                 bound = true
 
-                val waiter =
-                    readySignal
-
+                val waiter = readySignal
                 scope.launch {
                     try {
-                        val targetDevice =
-                            Build.MODEL.ifBlank {
-                                GALAXIAN_MODEL
-                            }
-
-                        val registered =
-                            transactRegisterSdk(
-                                service,
-                                targetDevice
-                            )
-
-                        if (!registered) {
-                            throw IllegalStateException(
-                                "STOCK GLYPH SERVICE REJECTED"
-                            )
+                        if (!transactRegisterSdk(service, targetDevice)) {
+                            throw IllegalStateException("STOCK GLYPH SERVICE REJECTED")
                         }
-
-                        transactNoArgs(
-                            service,
-                            TX_OPEN_SESSION
-                        )
-
-                        backend = Backend.STOCK
+                        transactNoArgs(service, TX_OPEN_SESSION)
                         ready = true
                         waiter.complete(Unit)
-
-                        postStatus(
-                            "READY • STOCK GLYPH • " +
-                                targetDevice
-                        )
+                        postStatus("READY • STOCK GLYPH • $targetDevice")
                     } catch (e: Throwable) {
                         ready = false
                         binder = null
-                        backend = Backend.NONE
-
-                        if (!waiter.isCompleted) {
-                            waiter.completeExceptionally(
-                                e
-                            )
-                        }
-
-                        postStatus(
-                            "GLYPH ERROR • " +
-                                (
-                                    e.message
-                                        ?: "UNKNOWN"
-                                )
-                        )
-
-                        if (!activateGalaxianBackend()) {
-                            safeUnbind()
-                            scheduleReconnect()
-                        }
+                        if (!waiter.isCompleted) waiter.completeExceptionally(e)
+                        postStatus("GLYPH ERROR • ${e.message ?: "UNKNOWN"}")
+                        safeUnbind()
+                        scheduleReconnect()
                     }
                 }
             }
 
-            override fun onServiceDisconnected(
-                name: ComponentName
-            ) {
-                ready = false
-                binder = null
-                binding = false
-                bound = false
-
-                resetReadySignal()
-
-                postStatus(
-                    "GLYPH SERVICE DISCONNECTED"
-                )
-
-                scheduleReconnect()
+            override fun onServiceDisconnected(name: ComponentName) {
+                onBindingLost("GLYPH SERVICE DISCONNECTED")
             }
 
-            override fun onBindingDied(
-                name: ComponentName
-            ) {
-                ready = false
-                binder = null
-                binding = false
-                bound = false
-
-                resetReadySignal()
-
-                postStatus(
-                    "GLYPH BINDING DIED"
-                )
-
-                scheduleReconnect()
+            override fun onBindingDied(name: ComponentName) {
+                onBindingLost("GLYPH BINDING DIED")
             }
 
-            override fun onNullBinding(
-                name: ComponentName
-            ) {
+            override fun onNullBinding(name: ComponentName) {
+                onBindingLost("GLYPH SERVICE RETURNED NO BINDER")
+            }
+
+            private fun onBindingLost(message: String) {
                 ready = false
                 binder = null
                 binding = false
                 bound = false
-
                 resetReadySignal()
-
-                postStatus(
-                    "GLYPH SERVICE RETURNED NO BINDER"
-                )
-
+                postStatus(message)
                 scheduleReconnect()
             }
         }
@@ -254,492 +141,142 @@ class GlyphController(context: Context) : AutoCloseable {
         connect()
     }
 
-    fun setStatusListener(
-        listener: ((String) -> Unit)?
-    ) {
+    fun setStatusListener(listener: ((String) -> Unit)?) {
         statusListener = listener
     }
 
     fun connect() {
-        if (
-            closed ||
-            binding ||
-            ready
-        ) {
-            return
-        }
+        if (closed || binding || ready) return
 
-        val now =
-            SystemClock.elapsedRealtime()
-
-        if (
-            now - lastConnectAttempt <
-                RECONNECT_COOLDOWN_MS
-        ) {
-            return
-        }
-
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastConnectAttempt < RECONNECT_COOLDOWN_MS) return
         lastConnectAttempt = now
 
-        if (readySignal.isCompleted) {
-            readySignal =
-                CompletableDeferred()
-        }
+        if (readySignal.isCompleted) readySignal = CompletableDeferred()
 
-        val intent =
-            Intent(BIND_ACTION).apply {
-                component =
-                    ComponentName(
-                        NOTHING_PACKAGE,
-                        NOTHING_SERVICE
-                    )
-            }
+        val intent = Intent(BIND_ACTION).apply {
+            component = ComponentName(NOTHING_PACKAGE, NOTHING_SERVICE)
+        }
 
         try {
             binding = true
-
-            val result =
-                appContext.bindService(
-                    intent,
-                    serviceConnection,
-                    Context.BIND_AUTO_CREATE
-                )
-
+            val result = appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             if (!result) {
-                binding = false
-                bound = false
-
-                if (!readySignal.isCompleted) {
-                    readySignal.completeExceptionally(
-                        IllegalStateException(
-                            "bindService returned false"
-                        )
-                    )
-                }
-
-                if (activateGalaxianBackend()) {
-                    return
-                }
-
-                postStatus(
-                    "GLYPH SERVICE NOT AVAILABLE"
-                )
-
-                scheduleReconnect()
+                onBindFailed(IllegalStateException("bindService returned false"), "GLYPH SERVICE NOT AVAILABLE")
                 return
             }
-
             bound = true
-
-            postStatus(
-                "CONNECTING • STOCK GLYPH"
-            )
+            postStatus("CONNECTING • STOCK GLYPH")
         } catch (e: SecurityException) {
-            binding = false
-            bound = false
-
-            if (!readySignal.isCompleted) {
-                readySignal.completeExceptionally(
-                    e
-                )
-            }
-
-            Log.e(
-                TAG,
-                "Glyph service bind denied",
-                e
-            )
-
-            if (activateGalaxianBackend()) {
-                return
-            }
-
-            postStatus(
-                "GLYPH PERMISSION DENIED"
-            )
-
-            scheduleReconnect()
+            Log.e(TAG, "Glyph service bind denied", e)
+            onBindFailed(e, "GLYPH PERMISSION DENIED")
         } catch (e: Throwable) {
-            binding = false
-            bound = false
-
-            if (!readySignal.isCompleted) {
-                readySignal.completeExceptionally(
-                    e
-                )
-            }
-
-            Log.e(
-                TAG,
-                "Glyph service bind failed",
-                e
-            )
-
-            if (activateGalaxianBackend()) {
-                return
-            }
-
-            postStatus(
-                "GLYPH SERVICE ERROR"
-            )
-
-            scheduleReconnect()
+            Log.e(TAG, "Glyph service bind failed", e)
+            onBindFailed(e, "GLYPH SERVICE ERROR")
         }
     }
 
-    suspend fun awaitReady(
-        timeoutMs: Long = READY_TIMEOUT_MS
-    ): Boolean {
-        if (ready) {
-            return true
-        }
+    private fun onBindFailed(e: Throwable, status: String) {
+        binding = false
+        bound = false
+        if (!readySignal.isCompleted) readySignal.completeExceptionally(e)
+        postStatus(status)
+        scheduleReconnect()
+    }
 
-        val deadline =
-            SystemClock.elapsedRealtime() +
-                timeoutMs.coerceAtLeast(250L)
-
-        while (
-            !closed &&
-            SystemClock.elapsedRealtime() <
-                deadline
-        ) {
-            if (ready) {
-                return true
-            }
-
+    suspend fun awaitReady(timeoutMs: Long = READY_TIMEOUT_MS): Boolean {
+        if (ready) return true
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs.coerceAtLeast(250L)
+        while (!closed && SystemClock.elapsedRealtime() < deadline) {
+            if (ready) return true
             connect()
-
-            val remaining =
-                (
-                    deadline -
-                        SystemClock.elapsedRealtime()
-                ).coerceAtLeast(1L)
-
-            val waiter =
-                readySignal
-
+            val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
+            val waiter = readySignal
             try {
-                val ok =
-                    withTimeoutOrNull(
-                        remaining.coerceAtMost(
-                            1_000L
-                        )
-                    ) {
-                        waiter.await()
-                        true
-                    } ?: false
-
-                if (ok && ready) {
-                    return true
-                }
+                val ok = withTimeoutOrNull(remaining.coerceAtMost(1_000L)) {
+                    waiter.await()
+                    true
+                } ?: false
+                if (ok && ready) return true
             } catch (_: Throwable) {
-                // A failed bind is retried until the deadline.
+                // Retried until the deadline.
             }
-
             delay(40L)
         }
-
-        if (!ready && activateGalaxianBackend()) {
-            return true
-        }
-
         return ready
     }
 
-    fun isReady(): Boolean =
-        ready
+    fun isReady(): Boolean = ready
 
-    fun targetDevice(): String =
-        Build.MODEL.ifBlank {
-            GALAXIAN_MODEL
+    fun backendLabel(): String =
+        if (ready) "READY • STOCK GLYPH" else "NO BACKEND"
+
+    fun playPattern(steps: List<GlyphStep>, repeat: Int = 1, maxSteps: Int = 32) {
+        stopPatternOnly()
+        val clean = steps.filter { it.durationMs > 0 }.take(maxSteps.coerceIn(1, 256))
+        if (clean.isEmpty()) return
+        effectJob = scope.launch {
+            if (!awaitReady()) {
+                postStatus("GLYPH NOT READY")
+                return@launch
+            }
+            repeat(repeat.coerceIn(1, 32)) {
+                for (step in clean) {
+                    if (!isActive) return@launch
+                    if (!sendFrame(step.brightness)) return@launch
+                    delay(step.durationMs)
+                }
+            }
+            sendFrame(0)
         }
-
-    fun setBrightness(
-        brightness: Int
-    ) {
-        stopPatternOnly()
-
-        effectJob =
-            scope.launch {
-                if (
-                    awaitReady()
-                ) {
-                    sendFrame(
-                        brightness
-                    )
-                }
-            }
     }
 
-    fun off() {
+    fun fastFlashLoop(brightness: Int = MAX_BRIGHTNESS, onMs: Long = 70, offMs: Long = 70) {
         stopPatternOnly()
-
-        effectJob =
-            scope.launch {
-                if (
-                    awaitReady()
-                ) {
-                    sendFrame(0)
-                }
+        effectJob = scope.launch {
+            if (!awaitReady()) {
+                postStatus("GLYPH NOT READY")
+                return@launch
             }
-    }
-
-    fun playPattern(
-        steps: List<GlyphStep>,
-        repeat: Int = 1
-    ) {
-        stopPatternOnly()
-
-        val clean =
-            steps
-                .filter {
-                    it.durationMs > 0
-                }
-                .take(32)
-
-        if (clean.isEmpty()) {
-            return
+            val level = brightness.coerceIn(0, MAX_BRIGHTNESS)
+            val on = onMs.coerceAtLeast(35L)
+            val off = offMs.coerceAtLeast(35L)
+            while (isActive) {
+                if (!sendFrame(level)) return@launch
+                delay(on)
+                if (!sendFrame(0)) return@launch
+                delay(off)
+            }
         }
-
-        effectJob =
-            scope.launch {
-                if (
-                    !awaitReady()
-                ) {
-                    postStatus(
-                        "GLYPH NOT READY"
-                    )
-                    return@launch
-                }
-
-                repeat(
-                    repeat.coerceIn(
-                        1,
-                        32
-                    )
-                ) {
-                    for (step in clean) {
-                        if (!isActive) {
-                            return@launch
-                        }
-
-                        if (
-                            !sendFrame(
-                                step.brightness
-                            )
-                        ) {
-                            return@launch
-                        }
-
-                        delay(
-                            step.durationMs
-                        )
-                    }
-                }
-
-                sendFrame(0)
-            }
-    }
-
-    fun blink(
-        brightness: Int
-    ) {
-        playPattern(
-            listOf(
-                GlyphStep(
-                    brightness,
-                    180
-                ),
-                GlyphStep(
-                    0,
-                    180
-                )
-            ),
-            repeat = 3
-        )
-    }
-
-    fun fastFlashLoop(
-        brightness: Int = 4095,
-        onMs: Long = 70,
-        offMs: Long = 70
-    ) {
-        stopPatternOnly()
-
-        effectJob =
-            scope.launch {
-                if (
-                    !awaitReady()
-                ) {
-                    postStatus(
-                        "GLYPH NOT READY"
-                    )
-                    return@launch
-                }
-
-                if (backend == Backend.GALAXIAN_SYSFS) {
-                    if (
-                        !writeGalaxianState(
-                            onMs.coerceIn(
-                                GALAXIAN_BLINK_MIN_MS,
-                                GALAXIAN_BLINK_MAX_MS
-                            ).toInt()
-                        )
-                    ) {
-                        postStatus(
-                            "GALAXIAN GLYPH WRITE FAILED • ROOT REQUIRED"
-                        )
-                    }
-                    return@launch
-                }
-
-                while (isActive) {
-                    if (
-                        !sendFrame(
-                            brightness.coerceIn(
-                                0,
-                                MAX_BRIGHTNESS
-                            )
-                        )
-                    ) {
-                        return@launch
-                    }
-
-                    delay(
-                        onMs.coerceAtLeast(35L)
-                    )
-
-                    if (
-                        !sendFrame(0)
-                    ) {
-                        return@launch
-                    }
-
-                    delay(
-                        offMs.coerceAtLeast(35L)
-                    )
-                }
-            }
-    }
-
-    fun pulse(
-        brightness: Int,
-        periodMs: Long = 1100
-    ) {
-        stopPatternOnly()
-
-        effectJob =
-            scope.launch {
-                if (
-                    !awaitReady()
-                ) {
-                    return@launch
-                }
-
-                val steps = 20
-
-                repeat(2) {
-                    for (i in 0..steps) {
-                        if (
-                            !isActive
-                        ) {
-                            return@launch
-                        }
-
-                        val wave =
-                            (
-                                1.0 -
-                                    kotlin.math.cos(
-                                        i *
-                                            kotlin.math.PI /
-                                            steps
-                                    )
-                            ) /
-                                2.0
-
-                        if (
-                            !sendFrame(
-                                (
-                                    brightness *
-                                        wave
-                                ).toInt()
-                            )
-                        ) {
-                            return@launch
-                        }
-
-                        delay(
-                            periodMs /
-                                (steps * 2)
-                        )
-                    }
-
-                    for (
-                        i in steps downTo 0
-                    ) {
-                        if (
-                            !isActive
-                        ) {
-                            return@launch
-                        }
-
-                        val wave =
-                            (
-                                1.0 -
-                                    kotlin.math.cos(
-                                        i *
-                                            kotlin.math.PI /
-                                            steps
-                                    )
-                            ) /
-                                2.0
-
-                        if (
-                            !sendFrame(
-                                (
-                                    brightness *
-                                        wave
-                                ).toInt()
-                            )
-                        ) {
-                            return@launch
-                        }
-
-                        delay(
-                            periodMs /
-                                (steps * 2)
-                        )
-                    }
-                }
-
-                sendFrame(0)
-            }
-    }
-
-    fun heartbeat(
-        brightness: Int
-    ) {
-        playPattern(
-            GlyphPatterns.heartbeat.map {
-                it.copy(
-                    brightness =
-                        if (
-                            it.brightness == 0
-                        ) {
-                            0
-                        } else {
-                            brightness
-                        }
-                )
-            }
-        )
     }
 
     fun stopPattern() {
         stopPatternOnly()
+        if (ready) sendFrame(0)
+    }
 
-        if (ready) {
-            sendFrame(0)
+    /**
+     * Steady metronome with an accented downbeat every 4 beats.
+     * Runs until [stopPattern] cancels it.
+     */
+    fun metronomeLoop(bpm: Int) {
+        stopPatternOnly()
+        effectJob = scope.launch {
+            if (!awaitReady()) {
+                postStatus("GLYPH NOT READY")
+                return@launch
+            }
+            val interval = (60_000L / bpm.coerceIn(30, 240)).coerceAtLeast(100L)
+            val on = 70L
+            var beat = 0
+            while (isActive) {
+                val level = if (beat % 4 == 0) MAX_BRIGHTNESS else 2000
+                if (!sendFrame(level)) return@launch
+                delay(on)
+                if (!sendFrame(0)) return@launch
+                delay((interval - on).coerceAtLeast(50L))
+                beat++
+            }
         }
     }
 
@@ -748,240 +285,42 @@ class GlyphController(context: Context) : AutoCloseable {
         effectJob = null
     }
 
-    private fun sendFrame(
-        brightness: Int
-    ): Boolean {
-        if (backend == Backend.GALAXIAN_SYSFS) {
-            val state =
-                if (brightness <= 0) {
-                    0
-                } else {
-                    1
-                }
-
-            val ok =
-                writeGalaxianState(state)
-
-            if (!ok) {
-                postStatus(
-                    "GALAXIAN GLYPH WRITE FAILED • ROOT REQUIRED"
-                )
-            }
-
-            return ok
-        }
-
-        val service =
-            binder
-
-        if (
-            service == null ||
-            !ready
-        ) {
-            return false
-        }
-
-        val frame =
-            intArrayOf(
-                brightness.coerceIn(
-                    0,
-                    MAX_BRIGHTNESS
-                )
-            )
-
+    private fun sendFrame(brightness: Int): Boolean {
+        val service = binder
+        if (service == null || !ready) return false
+        val frame = intArrayOf(brightness.coerceIn(0, MAX_BRIGHTNESS))
+        val request = Parcel.obtain()
+        val reply = Parcel.obtain()
         try {
-            val request =
-                Parcel.obtain()
-
-            val reply =
-                Parcel.obtain()
-
-            try {
-                request.writeInterfaceToken(
-                    DESCRIPTOR
-                )
-
-                request.writeIntArray(
-                    frame
-                )
-
-                val transacted =
-                    service.transact(
-                        TX_SET_FRAME_COLORS,
-                        request,
-                        reply,
-                        0
-                    )
-
-                if (!transacted) {
-                    throw IllegalStateException(
-                        "Binder transaction returned false"
-                    )
-                }
-
-                reply.readException()
-            } finally {
-                request.recycle()
-                reply.recycle()
+            request.writeInterfaceToken(DESCRIPTOR)
+            request.writeIntArray(frame)
+            if (!service.transact(TX_SET_FRAME_COLORS, request, reply, 0)) {
+                throw IllegalStateException("Binder transaction returned false")
             }
-
+            reply.readException()
             return true
         } catch (e: Throwable) {
-            Log.e(
-                TAG,
-                "setFrameColors failed",
-                e
-            )
-
+            Log.e(TAG, "setFrameColors failed", e)
             ready = false
             binder = null
             resetReadySignal()
-
-            postStatus(
-                "GLYPH WRITE FAILED"
-            )
-
+            postStatus("GLYPH WRITE FAILED")
             scheduleReconnect()
-
             return false
+        } finally {
+            request.recycle()
+            reply.recycle()
         }
     }
 
-    private fun isGalaxianNodePresent(): Boolean =
-        File(GALAXIAN_STATE_PATH).exists()
-
-    private fun activateGalaxianBackend(): Boolean {
-        if (!isGalaxianNodePresent() || closed) {
-            return false
-        }
-
-        safeUnbind()
-
-        binder = null
-        binding = false
-        bound = false
-        backend = Backend.GALAXIAN_SYSFS
-        ready = true
-
-        if (!readySignal.isCompleted) {
-            readySignal.complete(Unit)
-        }
-
-        postStatus(
-            "READY • GALAXIAN SYSFS"
-        )
-
-        return true
-    }
-
-    private fun writeGalaxianState(
-        state: Int
-    ): Boolean {
-        val value =
-            state.coerceIn(
-                0,
-                GALAXIAN_BLINK_MAX_MS.toInt()
-            )
-
+    private fun transactNoArgs(service: IBinder, code: Int) {
+        val request = Parcel.obtain()
+        val reply = Parcel.obtain()
         try {
-            FileOutputStream(
-                GALAXIAN_STATE_PATH
-            ).use { output ->
-                output.write(
-                    "$value\n".toByteArray()
-                )
-                output.flush()
+            request.writeInterfaceToken(DESCRIPTOR)
+            if (!service.transact(code, request, reply, 0)) {
+                throw IllegalStateException("Binder transaction returned false")
             }
-
-            return true
-        } catch (e: Throwable) {
-            Log.d(
-                TAG,
-                "Direct Galaxian sysfs write failed; trying su",
-                e
-            )
-        }
-
-        val command =
-            "printf '%d\\n' $value > '$GALAXIAN_STATE_PATH'"
-
-        return try {
-            val process =
-                ProcessBuilder(
-                    "su",
-                    "-c",
-                    command
-                )
-                    .redirectErrorStream(true)
-                    .start()
-
-            if (
-                !process.waitFor(
-                    3L,
-                    TimeUnit.SECONDS
-                )
-            ) {
-                process.destroyForcibly()
-
-                Log.w(
-                    TAG,
-                    "su timed out while writing Galaxian Glyph"
-                )
-
-                false
-            } else {
-                val exitCode =
-                    process.exitValue()
-
-                if (exitCode != 0) {
-                    Log.w(
-                        TAG,
-                        "su write failed with exit code $exitCode"
-                    )
-                }
-
-                exitCode == 0
-            }
-        } catch (e: Throwable) {
-            Log.e(
-                TAG,
-                "Unable to write Galaxian Glyph through su",
-                e
-            )
-
-            false
-        }
-    }
-
-    private fun transactNoArgs(
-        service: IBinder,
-        code: Int
-    ) {
-        val request =
-            Parcel.obtain()
-
-        val reply =
-            Parcel.obtain()
-
-        try {
-            request.writeInterfaceToken(
-                DESCRIPTOR
-            )
-
-            val transacted =
-                service.transact(
-                    code,
-                    request,
-                    reply,
-                    0
-                )
-
-            if (!transacted) {
-                throw IllegalStateException(
-                    "Binder transaction returned false"
-                )
-            }
-
             reply.readException()
         } finally {
             request.recycle()
@@ -989,38 +328,14 @@ class GlyphController(context: Context) : AutoCloseable {
         }
     }
 
-    private fun transactRegisterSdk(
-        service: IBinder,
-        targetDevice: String
-    ): Boolean {
-        val request =
-            Parcel.obtain()
-
-        val reply =
-            Parcel.obtain()
-
+    private fun transactRegisterSdk(service: IBinder, target: String): Boolean {
+        val request = Parcel.obtain()
+        val reply = Parcel.obtain()
         return try {
-            request.writeInterfaceToken(
-                DESCRIPTOR
-            )
-
-            request.writeString(
-                API_KEY
-            )
-
-            request.writeString(
-                targetDevice
-            )
-
-            val transacted =
-                service.transact(
-                    TX_REGISTER_SDK,
-                    request,
-                    reply,
-                    0
-                )
-
-            if (!transacted) {
+            request.writeInterfaceToken(DESCRIPTOR)
+            request.writeString(API_KEY)
+            request.writeString(target)
+            if (!service.transact(TX_REGISTER_SDK, request, reply, 0)) {
                 false
             } else {
                 reply.readException()
@@ -1033,43 +348,21 @@ class GlyphController(context: Context) : AutoCloseable {
     }
 
     private fun resetReadySignal() {
-        if (
-            readySignal.isCompleted
-        ) {
-            readySignal =
-                CompletableDeferred()
-        }
+        if (readySignal.isCompleted) readySignal = CompletableDeferred()
     }
 
     private fun scheduleReconnect() {
-        if (closed) {
-            return
-        }
-
+        if (closed) return
         scope.launch {
-            delay(
-                CONNECT_RETRY_MS
-            )
-
-            if (
-                !closed &&
-                !ready &&
-                !binding
-            ) {
-                connect()
-            }
+            delay(CONNECT_RETRY_MS)
+            if (!closed && !ready && !binding) connect()
         }
     }
 
     private fun safeUnbind() {
-        if (!bound) {
-            return
-        }
-
+        if (!bound) return
         try {
-            appContext.unbindService(
-                serviceConnection
-            )
+            appContext.unbindService(serviceConnection)
         } catch (_: Throwable) {
         } finally {
             bound = false
@@ -1077,67 +370,31 @@ class GlyphController(context: Context) : AutoCloseable {
         }
     }
 
-    private fun postStatus(
-        message: String
-    ) {
-        val listener =
-            statusListener
-                ?: return
-
-        if (
-            Looper.myLooper() ==
-                Looper.getMainLooper()
-        ) {
-            listener.invoke(message)
+    private fun postStatus(message: String) {
+        val listener = statusListener ?: return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            listener(message)
         } else {
-            android.os.Handler(
-                Looper.getMainLooper()
-            ).post {
-                listener.invoke(message)
-            }
+            mainHandler.post { listener(message) }
         }
     }
 
     override fun close() {
-        if (closed) {
-            return
-        }
-
+        if (closed) return
         closed = true
         stopPatternOnly()
-
-        val service =
-            binder
-
-        if (
-            service != null &&
-            ready
-        ) {
+        val service = binder
+        if (service != null && ready) {
             try {
-                transactNoArgs(
-                    service,
-                    TX_CLOSE_SESSION
-                )
+                transactNoArgs(service, TX_CLOSE_SESSION)
             } catch (e: Throwable) {
-                Log.w(
-                    TAG,
-                    "Failed to close Glyph session",
-                    e
-                )
+                Log.w(TAG, "Failed to close Glyph session", e)
             }
         }
-
-        if (backend == Backend.GALAXIAN_SYSFS) {
-            writeGalaxianState(0)
-        }
-
         ready = false
         binder = null
         binding = false
-        backend = Backend.NONE
-
         safeUnbind()
-
         scope.cancel()
     }
 }

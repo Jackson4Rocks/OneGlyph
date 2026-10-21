@@ -33,12 +33,12 @@ jobs:
         run: |
           sdkmanager --version
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.3.1"
+          gradle-version: "9.7.1"
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug --stacktrace

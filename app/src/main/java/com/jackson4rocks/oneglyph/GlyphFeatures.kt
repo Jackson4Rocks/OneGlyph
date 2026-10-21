@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.MediaMetadata
-import android.media.RingtoneManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
@@ -19,8 +18,6 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
-import android.view.KeyEvent
-import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -150,6 +147,37 @@ class PatternStore(context: Context) {
             .apply()
     }
 
+    fun lowBatteryAlertEnabled(): Boolean =
+        prefs.getBoolean("low_battery_alert", true)
+
+    fun setLowBatteryAlertEnabled(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("low_battery_alert", enabled)
+            .apply()
+    }
+
+    fun notificationFlashEnabled(): Boolean =
+        prefs.getBoolean("notification_flash", true)
+
+    fun setNotificationFlashEnabled(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("notification_flash", enabled)
+            .apply()
+    }
+
+    fun metronomeBpm(): Int =
+        prefs.getInt("metronome_bpm", 96)
+            .coerceIn(30, 240)
+
+    fun setMetronomeBpm(bpm: Int) {
+        prefs.edit()
+            .putInt(
+                "metronome_bpm",
+                bpm.coerceIn(30, 240)
+            )
+            .apply()
+    }
+
     fun chargeTarget(): Int =
         prefs.getInt("charge_target", 80)
             .coerceIn(80, 100)
@@ -266,6 +294,41 @@ class GlyphMediaSessionService :
         }
     }
 
+    override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
+        super.onNotificationPosted(sbn)
+
+        val notification = sbn ?: return
+        // Never flash for ongoing notifications (media players, the
+        // persistent Glyph service notification itself) or our own.
+        if (notification.isOngoing) return
+        if (notification.packageName == packageName) return
+
+        val store = PatternStore(this)
+        if (!store.appEnabled() || !store.notificationFlashEnabled()) return
+
+        // Never steal the dot from an active persistent mode
+        // (Toy, Music Sync, Metronome): a second concurrent Glyph
+        // session would stomp its frames and tear down its session.
+        if (GlyphBackgroundService.currentMode(this) != "none") return
+
+        // Debounce: one flash per burst so a chatty app doesn't
+        // strobe the dot.
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastNotifFlashMs < 4_000L) return
+        lastNotifFlashMs = now
+
+        notifScope.launch {
+            GlyphAction.playOnce(
+                this@GlyphMediaSessionService,
+                GlyphPatterns.repeated(
+                    onMs = 160,
+                    offMs = 160,
+                    count = 2
+                )
+            )
+        }
+    }
+
     override fun onListenerDisconnected() {
         android.util.Log.w(
             "OneGlyph",
@@ -273,6 +336,16 @@ class GlyphMediaSessionService :
         )
 
         super.onListenerDisconnected()
+    }
+
+    companion object {
+        @Volatile
+        private var lastNotifFlashMs = 0L
+
+        private val notifScope =
+            CoroutineScope(
+                Dispatchers.IO
+            )
     }
 }
 
@@ -597,38 +670,36 @@ class MusicBeatVisualizer(
                             ] = magnitude
                         }
 
-                        fluxHistory.addLast(
-                            flux
-                        )
+                        fluxHistory.addLast(flux)
 
-                        while (
-                            fluxHistory.size > 24
-                        ) {
+                        while (fluxHistory.size > 24) {
                             fluxHistory.removeFirst()
                         }
 
-                        if (
-                            fluxHistory.size < 8
-                        ) {
+                        if (fluxHistory.size < 8) {
                             return
                         }
 
-                        val baseline =
-                            fluxHistory
-                                .dropLast(1)
-                                .average()
-                                .coerceAtLeast(
-                                    1.0
-                                )
+                        // Manual sums: avoids dropLast/takeLast/average
+                        // list allocations on every FFT callback.
+                        var sum = 0.0
+                        var recentSum = 0.0
+                        var count = 0
+                        var recentCount = 0
+                        val lastIndex = fluxHistory.size - 1
+                        for ((index, value) in fluxHistory.withIndex()) {
+                            if (index == lastIndex) break
+                            sum += value
+                            count++
+                            if (index >= lastIndex - 4) {
+                                recentSum += value
+                                recentCount++
+                            }
+                        }
 
+                        val baseline = (if (count > 0) sum / count else 1.0).coerceAtLeast(1.0)
                         val recentBaseline =
-                            fluxHistory
-                                .dropLast(1)
-                                .takeLast(4)
-                                .average()
-                                .coerceAtLeast(
-                                    1.0
-                                )
+                            (if (recentCount > 0) recentSum / recentCount else 1.0).coerceAtLeast(1.0)
 
                         val ratio =
                             flux /
@@ -636,17 +707,17 @@ class MusicBeatVisualizer(
 
                         val rising =
                             flux >
-                                recentBaseline * 1.05
+                                recentBaseline * 1.03
 
                         val now =
                             SystemClock
                                 .uptimeMillis()
 
                         if (
-                            ratio >= 1.5 &&
+                            ratio >= 1.4 &&
                             rising &&
                             now - lastBeatMs >=
-                                170L
+                                150L
                         ) {
                             lastBeatMs = now
 
@@ -703,8 +774,10 @@ class BeatSyncController(
     private val glyph: GlyphController,
     private val onState:
         (MediaPlaybackInfo?) -> Unit,
-    private val onError:
-        (String) -> Unit
+    private val onEngine:
+        (String) -> Unit = {},
+    private val onPulse:
+        () -> Unit = {}
 ) : AutoCloseable {
     private val appContext =
         context.applicationContext
@@ -732,7 +805,7 @@ class BeatSyncController(
                 },
                 onAccessError = {
                     stopAudio()
-                    onError(
+                    onEngine(
                         "Turn on Media Access in Settings."
                     )
                 }
@@ -779,11 +852,12 @@ class BeatSyncController(
         val next =
             MusicBeatVisualizer(
                 appContext
-            ) {
+            ) { strength ->
+                onPulse()
                 glyph.playPattern(
                     listOf(
                         GlyphStep(
-                            it,
+                            strength,
                             70
                         ),
                         GlyphStep(
@@ -796,9 +870,10 @@ class BeatSyncController(
 
         if (next.start()) {
             visualizer = next
+            onEngine("LISTENING")
         } else {
             visualizer = null
-            onError(
+            onEngine(
                 "Beat Sync could not access the audio output."
             )
         }
@@ -807,6 +882,7 @@ class BeatSyncController(
     private fun stopAudio() {
         visualizer?.stop()
         visualizer = null
+        onEngine("STOPPED")
         glyph.stopPattern()
     }
 
@@ -857,8 +933,155 @@ object GlyphAction {
     }
 }
 
-object CameraCountdown {
-    fun start(
+/**
+ * Playful one-shot dot effects: morse coder, talking digits (clock,
+ * battery meter), guided breathing and SOS. All built as plain step
+ * lists so they run on the stock Glyph service with no new
+ * permissions.
+ */
+object DotFun {
+    private const val UNIT = 110L
+    private const val FULL = 4095
+
+    private val morseTable = mapOf(
+        'A' to ".-", 'B' to "-...", 'C' to "-.-.", 'D' to "-..",
+        'E' to ".", 'F' to "..-.", 'G' to "--.", 'H' to "....",
+        'I' to "..", 'J' to ".---", 'K' to "-.-", 'L' to ".-..",
+        'M' to "--", 'N' to "-.", 'O' to "---", 'P' to ".--.",
+        'Q' to "--.-", 'R' to ".-.", 'S' to "...", 'T' to "-",
+        'U' to "..-", 'V' to "...-", 'W' to ".--", 'X' to "-..-",
+        'Y' to "-.--", 'Z' to "--..",
+        '0' to "-----", '1' to ".----", '2' to "..---",
+        '3' to "...--", '4' to "....-", '5' to ".....",
+        '6' to "-....", '7' to "--...", '8' to "---..",
+        '9' to "----.",
+        '.' to ".-.-.-", ',' to "--..--", '?' to "..--..",
+        '!' to "-.-.--"
+    )
+
+    /** Text to morse steps. Capped to 40 chars to bound the pattern. */
+    fun morseSteps(text: String): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(128)
+        for (char in text.uppercase().take(40)) {
+            if (char == ' ') {
+                // Word gap: 6 extra units (1 already follows each symbol).
+                steps += GlyphStep(0, UNIT * 6)
+                continue
+            }
+            val code = morseTable[char] ?: continue
+            for (symbol in code) {
+                steps += GlyphStep(
+                    FULL,
+                    if (symbol == '.') UNIT else UNIT * 3
+                )
+                steps += GlyphStep(0, UNIT)
+            }
+            // Letter gap: 2 extra units on top of the trailing 1.
+            steps += GlyphStep(0, UNIT * 2)
+        }
+        return steps
+    }
+
+    private fun digitSteps(digit: Int): List<GlyphStep> {
+        if (digit <= 0) {
+            // Zero reads as one long glow instead of silence.
+            return listOf(GlyphStep(FULL, 600), GlyphStep(0, 250))
+        }
+        val steps = ArrayList<GlyphStep>(digit * 2)
+        repeat(digit.coerceIn(1, 12)) {
+            steps += GlyphStep(FULL, 150)
+            steps += GlyphStep(0, 150)
+        }
+        return steps
+    }
+
+    private fun separator(): GlyphStep = GlyphStep(0, 600)
+
+    /** e.g. 3:27 -> 3 flashes, pause, 2, pause, 7. */
+    fun talkingClockSteps(hour12: Int, minute: Int): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(64)
+        steps += digitSteps(hour12.coerceIn(1, 12))
+        steps += separator()
+        steps += digitSteps((minute / 10).coerceIn(0, 5))
+        steps += separator()
+        steps += digitSteps((minute % 10).coerceIn(0, 9))
+        return steps
+    }
+
+    /** e.g. 73% -> 7 flashes, pause, 3 flashes. */
+    fun batteryMeterSteps(percent: Int): List<GlyphStep> {
+        val level = percent.coerceIn(0, 100)
+        val steps = ArrayList<GlyphStep>(48)
+        steps += digitSteps(level / 10)
+        steps += separator()
+        steps += digitSteps(level % 10)
+        return steps
+    }
+
+    /** 4-7-8 guided breathing, [rounds] cycles. */
+    fun breathingSteps(rounds: Int = 2): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(64)
+        repeat(rounds.coerceIn(1, 4)) {
+            // Inhale 4s: dot swells up.
+            steps += GlyphStep(800, 1000)
+            steps += GlyphStep(1600, 1000)
+            steps += GlyphStep(2400, 1000)
+            steps += GlyphStep(3200, 1000)
+            // Hold 7s: steady dim glow.
+            steps += GlyphStep(1200, 7000)
+            // Exhale 8s: dot sinks back down.
+            steps += GlyphStep(3200, 1000)
+            steps += GlyphStep(2600, 1000)
+            steps += GlyphStep(2000, 1000)
+            steps += GlyphStep(1400, 1000)
+            steps += GlyphStep(800, 4000)
+            steps += GlyphStep(0, 800)
+        }
+        return steps
+    }
+
+    fun sosSteps(): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(24)
+        repeat(3) {
+            steps += GlyphStep(FULL, 150)
+            steps += GlyphStep(0, 150)
+        }
+        steps += GlyphStep(0, 400)
+        repeat(3) {
+            steps += GlyphStep(FULL, 400)
+            steps += GlyphStep(0, 200)
+        }
+        steps += GlyphStep(0, 400)
+        repeat(3) {
+            steps += GlyphStep(FULL, 150)
+            steps += GlyphStep(0, 150)
+        }
+        return steps
+    }
+
+    fun diceSuspenseSteps(): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(20)
+        var gap = 90L
+        repeat(8) {
+            steps += GlyphStep(FULL, 90)
+            steps += GlyphStep(0, gap)
+            gap += 40L
+        }
+        return steps
+    }
+
+    fun diceResultSteps(rolled: Int): List<GlyphStep> {
+        val steps = ArrayList<GlyphStep>(20)
+        steps += GlyphStep(0, 300)
+        repeat(rolled.coerceIn(1, 6)) {
+            steps += GlyphStep(FULL, 260)
+            steps += GlyphStep(0, 220)
+        }
+        return steps
+    }
+}
+
+object CameraCountdown {    fun start(
         context: Context,
         seconds: Int
     ) {
@@ -918,117 +1141,6 @@ object CameraCountdown {
             context,
             steps
         )
-    }
-
-    fun start(
-        context: Context,
-        controller: GlyphController,
-        seconds: Int
-    ) {
-        val store =
-            PatternStore(context)
-
-        if (!store.appEnabled()) {
-            return
-        }
-
-        try {
-            context.startActivity(
-                Intent(
-                    android.provider.MediaStore
-                        .INTENT_ACTION_STILL_IMAGE_CAMERA
-                )
-            )
-        } catch (_: Throwable) {
-            return
-        }
-
-        val duration =
-            seconds.coerceIn(3, 10) * 1000L
-
-        CoroutineScope(
-            Dispatchers.IO
-        ).launch {
-            val start =
-                SystemClock
-                    .uptimeMillis()
-
-            while (
-                SystemClock.uptimeMillis() -
-                    start <
-                    duration
-            ) {
-                val elapsed =
-                    (
-                        SystemClock.uptimeMillis() -
-                            start
-                    ).coerceAtLeast(
-                        0L
-                    )
-
-                val progress =
-                    (
-                        elapsed.toFloat() /
-                            duration
-                    ).coerceIn(
-                        0f,
-                        0.999f
-                    )
-
-                val cycleMs =
-                    (
-                        700L -
-                            progress * 560L
-                    ).toLong().coerceAtLeast(
-                        140L
-                    )
-
-                val onMs =
-                    (
-                        105L -
-                            progress * 45L
-                    ).toLong().coerceAtLeast(
-                        55L
-                    )
-
-                controller.playPattern(
-                    listOf(
-                        GlyphStep(
-                            2500 +
-                                (1500 * progress)
-                                    .toInt(),
-                            onMs
-                        ),
-                        GlyphStep(
-                            0,
-                            (
-                                cycleMs -
-                                    onMs
-                            ).coerceAtLeast(
-                                55L
-                            )
-                        )
-                    )
-                )
-
-                delay(
-                    cycleMs
-                )
-            }
-
-            controller.playPattern(
-                listOf(
-                    GlyphStep(
-                        4095,
-                        180
-                    ),
-                    GlyphStep(
-                        0,
-                        250
-                    )
-                )
-            )
-        }
     }
 }
 
@@ -1324,6 +1436,20 @@ class ChargingEffectReceiver :
                             .onBoot(
                                 context
                             )
+
+                    Intent.ACTION_BATTERY_LOW -> {
+                        val store = PatternStore(context)
+
+                        if (
+                            store.appEnabled() &&
+                            store.lowBatteryAlertEnabled()
+                        ) {
+                            GlyphAction.playOnce(
+                                context,
+                                DotFun.sosSteps()
+                            )
+                        }
+                    }
                 }
             } finally {
                 pendingResult.finish()

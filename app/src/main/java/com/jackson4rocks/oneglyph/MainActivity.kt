@@ -12,23 +12,36 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,8 +53,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -56,10 +71,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -68,6 +89,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import com.jackson4rocks.oneglyph.ui.component.FloatingBottomBar
+import com.jackson4rocks.oneglyph.ui.component.FloatingBottomBarItem
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 
 private val Red = Color(0xFFFF3B30)
 
@@ -81,6 +109,10 @@ private val DarkScheme =
         onSecondary = Color.Black,
         onBackground = Color.White,
         onSurface = Color.White,
+        surfaceContainer = Color(0xFF141416),
+        surfaceContainerHigh = Color(0xFF232326),
+        surfaceVariant = Color(0xFF2C2C2E),
+        onSurfaceVariant = Color(0xFFAEAEB2),
         outline = Color(0xFF303030),
         error = Red
     )
@@ -95,12 +127,16 @@ private val LightScheme =
         onSecondary = Color.White,
         onBackground = Color.Black,
         onSurface = Color.Black,
+        surfaceContainer = Color.White,
+        surfaceContainerHigh = Color(0xFFE8E8ED),
+        surfaceVariant = Color(0xFFD1D1D6),
+        onSurfaceVariant = Color(0xFF6E6E6E),
         outline = Color(0xFFBEBEBE),
         error = Red
     )
 
-private val NDotFamily =
-    runCatching {
+private val NDotFamily: FontFamily =
+    try {
         FontFamily(
             Font(
                 DeviceFontFamilyName(
@@ -108,7 +144,7 @@ private val NDotFamily =
                 )
             )
         )
-    }.getOrElse {
+    } catch (_: Throwable) {
         FontFamily.Monospace
     }
 
@@ -141,9 +177,21 @@ private fun OneGlyphApp() {
             PatternStore(context)
         }
 
-    var page by remember {
-        mutableStateOf("HOME")
-    }
+    val pages =
+        remember {
+            listOf("HOME", "PLAY", "COMPOSER", "SETTINGS")
+        }
+
+    val pagerState =
+        rememberPagerState(
+            pageCount = { pages.size }
+        )
+
+    val navScope =
+        rememberCoroutineScope()
+
+    val contentBackdrop =
+        rememberLayerBackdrop()
 
     var showSplash by remember {
         mutableStateOf(true)
@@ -173,6 +221,14 @@ private fun OneGlyphApp() {
         mutableStateOf(false)
     }
 
+    var linkDetailText by remember {
+        mutableStateOf(
+            GlyphBackgroundService.linkDetail(
+                context
+            )
+        )
+    }
+
     var status by remember {
         mutableStateOf("Ready.")
     }
@@ -191,6 +247,10 @@ private fun OneGlyphApp() {
 
     var playback by remember {
         mutableStateOf<MediaPlaybackInfo?>(null)
+    }
+
+    var beatEngine by remember {
+        mutableStateOf("ENGINE • STOPPED")
     }
 
     var brightness by remember {
@@ -225,6 +285,39 @@ private fun OneGlyphApp() {
         mutableStateOf(
             store.backgroundMode() ==
                 "toy"
+        )
+    }
+
+    var metroOn by remember {
+        mutableStateOf(
+            store.backgroundMode() ==
+                "metronome"
+        )
+    }
+
+    var bpm by remember {
+        mutableIntStateOf(
+            store.metronomeBpm()
+        )
+    }
+
+    var morseText by remember {
+        mutableStateOf("SOS")
+    }
+
+    var diceResult by remember {
+        mutableIntStateOf(0)
+    }
+
+    var notifFlashOn by remember {
+        mutableStateOf(
+            store.notificationFlashEnabled()
+        )
+    }
+
+    var lowBatteryOn by remember {
+        mutableStateOf(
+            store.lowBatteryAlertEnabled()
         )
     }
 
@@ -293,6 +386,7 @@ private fun OneGlyphApp() {
                     "music_sync"
                 )
                 toyOn = false
+                metroOn = false
                 beatSyncOn = true
                 requestBackgroundRecoveryAccess(
                     context
@@ -335,6 +429,7 @@ private fun OneGlyphApp() {
             beatSyncOn = false
             playback = null
             toyOn = false
+            metroOn = false
             GlyphBackgroundService.stopPattern(context)
             GlyphBackgroundService.stopService(
                 context
@@ -379,6 +474,16 @@ private fun OneGlyphApp() {
             connected =
                 GlyphBackgroundService.isGlyphReady(context)
 
+            linkDetailText =
+                GlyphBackgroundService.linkDetail(
+                    context
+                )
+
+            beatEngine =
+                GlyphBackgroundService.beatStatusText(
+                    context
+                )
+
             audioAccess =
                 hasAudioAccess(context)
 
@@ -392,7 +497,9 @@ private fun OneGlyphApp() {
                 playbackWatcher.refresh()
             }
 
-            delay(1000L)
+            // Poll at 2s instead of 1s: halves UI wakeups and
+            // PackageManager checks with no visible downside.
+            delay(2000L)
         }
     }
 
@@ -460,35 +567,96 @@ private fun OneGlyphApp() {
             color =
                 colors.background
         ) {
-            Column(
+            Box(
                 modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(
-                            rememberScrollState()
-                        )
-                        .padding(
-                            horizontal = 18.dp,
-                            vertical = 14.dp
-                        ),
-                verticalArrangement =
-                    Arrangement.spacedBy(
-                        14.dp
-                    )
+                    Modifier.fillMaxSize()
             ) {
-                Header(
-                    enabled = appEnabled,
-                    connected = connected
-                )
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .layerBackdrop(
+                                contentBackdrop
+                            )
+                            .padding(
+                                horizontal = 18.dp
+                            )
+                            .padding(
+                                top = 14.dp
+                            ),
+                    verticalArrangement =
+                        Arrangement.spacedBy(
+                            14.dp
+                        )
+                ) {
+                    Header(
+                        enabled = appEnabled,
+                        connected = connected
+                    )
 
-                TopNavigation(
-                    page = page,
-                    onPage = {
-                        page = it
-                    }
-                )
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                        // All 4 pages stay composed: zero
+                        // first-swipe composition jank.
+                        beyondViewportPageCount = 1,
+                        // Floaty spring settle instead of a hard snap.
+                        flingBehavior =
+                            PagerDefaults.flingBehavior(
+                                state = pagerState,
+                                snapAnimationSpec = spring(
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ),
+                        verticalAlignment =
+                            Alignment.Top
+                    ) { index ->
+                        Column(
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    // Carousel fade: outgoing pages dim
+                                    // and shrink slightly, all in the
+                                    // draw phase (no recomposition).
+                                    .graphicsLayer {
+                                        val pageOffset =
+                                            (
+                                                pagerState.currentPage -
+                                                    index +
+                                                    pagerState.currentPageOffsetFraction
+                                                ).coerceIn(-1f, 1f)
 
-                when (page) {
+                                        val fade =
+                                            1f - minOf(
+                                                0.35f,
+                                                abs(pageOffset) * 0.35f
+                                            )
+
+                                        val scale =
+                                            1f - minOf(
+                                                0.04f,
+                                                abs(pageOffset) * 0.04f
+                                            )
+
+                                        alpha = fade
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                                    .verticalScroll(
+                                        rememberScrollState()
+                                    )
+                                    .padding(
+                                        bottom = 108.dp
+                                    ),
+                            verticalArrangement =
+                                Arrangement.spacedBy(
+                                    14.dp
+                                )
+                        ) {
+                            when (pages[index]) {
                     "HOME" -> {
                         HomePage(
                             context = context,
@@ -500,6 +668,7 @@ private fun OneGlyphApp() {
                             playback = playback,
                             brightness = brightness,
                             cameraSeconds = cameraSeconds,
+                            beatEngine = beatEngine,
                             onBrightness = {
                                 brightness = it
                             },
@@ -532,6 +701,7 @@ private fun OneGlyphApp() {
                                         "music_sync"
                                     )
                                     toyOn = false
+                                    metroOn = false
                                     beatSyncOn = true
                                     requestBackgroundRecoveryAccess(
                                         context
@@ -547,6 +717,18 @@ private fun OneGlyphApp() {
                                 openMediaAccess(
                                     context
                                 )
+                            },
+                            onBeatTest = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    GlyphBackgroundService.beatTest(
+                                        context
+                                    )
+                                    status =
+                                        "Test pulse sent."
+                                }
                             },
                             onBlink = {
                                 if (
@@ -582,6 +764,161 @@ private fun OneGlyphApp() {
                         )
                     }
 
+                    "PLAY" -> {
+                        PlayPage(
+                            context = context,
+                            enabled = appEnabled,
+                            connected = connected,
+                            metroOn = metroOn,
+                            bpm = bpm,
+                            morseText = morseText,
+                            diceResult = diceResult,
+                            onBpm = {
+                                bpm = it
+                                store.setMetronomeBpm(it)
+                            },
+                            onMorseText = {
+                                morseText = it
+                            },
+                            onMetronome = {
+                                if (!appEnabled) {
+                                    status =
+                                        "Turn on OneGlyph in Settings first."
+                                } else if (metroOn) {
+                                    store.setBackgroundMode(
+                                        "none"
+                                    )
+                                    metroOn = false
+                                    GlyphBackgroundService.stopMetronome(
+                                        context
+                                    )
+                                    status =
+                                        "Metronome is off."
+                                } else if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    store.setBackgroundMode(
+                                        "metronome"
+                                    )
+                                    toyOn = false
+                                    beatSyncOn = false
+                                    metroOn = true
+                                    requestBackgroundRecoveryAccess(
+                                        context
+                                    )
+                                    GlyphBackgroundService.startMetronome(
+                                        context,
+                                        bpm
+                                    )
+                                    status =
+                                        "Metronome at $bpm BPM."
+                                }
+                            },
+                            onMorse = {
+                                if (
+                                    appEnabled &&
+                                    connected &&
+                                    morseText.isNotBlank()
+                                ) {
+                                    GlyphBackgroundService.playLongPattern(
+                                        context,
+                                        DotFun.morseSteps(morseText)
+                                    )
+                                    status =
+                                        "Flashing morse."
+                                }
+                            },
+                            onStop = {
+                                GlyphBackgroundService.stopPattern(context)
+                                status =
+                                    "Glyph stopped."
+                            },
+                            onClock = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    val now =
+                                        java.util.Calendar.getInstance()
+                                    val hour =
+                                        now.get(java.util.Calendar.HOUR)
+                                            .let { if (it == 0) 12 else it }
+                                    val minute =
+                                        now.get(java.util.Calendar.MINUTE)
+                                    GlyphBackgroundService.playLongPattern(
+                                        context,
+                                        DotFun.talkingClockSteps(hour, minute)
+                                    )
+                                    status =
+                                        "The time is $hour:${minute.toString().padStart(2, '0')}."
+                                }
+                            },
+                            onBattery = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    val battery =
+                                        context.registerReceiver(
+                                            null,
+                                            android.content.IntentFilter(
+                                                android.content.Intent.ACTION_BATTERY_CHANGED
+                                            )
+                                        )
+                                    val level =
+                                        battery?.getIntExtra(
+                                            android.os.BatteryManager.EXTRA_LEVEL,
+                                            -1
+                                        ) ?: -1
+                                    val scale =
+                                        battery?.getIntExtra(
+                                            android.os.BatteryManager.EXTRA_SCALE,
+                                            100
+                                        ) ?: 100
+                                    if (level >= 0 && scale > 0) {
+                                        val percent = level * 100 / scale
+                                        GlyphBackgroundService.playLongPattern(
+                                            context,
+                                            DotFun.batteryMeterSteps(percent)
+                                        )
+                                        status =
+                                            "Battery is $percent%."
+                                    }
+                                }
+                            },
+                            onDice = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    val rolled = (1..6).random()
+                                    diceResult = rolled
+                                    GlyphBackgroundService.playPattern(
+                                        context,
+                                        DotFun.diceSuspenseSteps() +
+                                            DotFun.diceResultSteps(rolled)
+                                    )
+                                    status =
+                                        "You rolled $rolled."
+                                }
+                            },
+                            onBreathe = {
+                                if (
+                                    appEnabled &&
+                                    connected
+                                ) {
+                                    GlyphBackgroundService.playLongPattern(
+                                        context,
+                                        DotFun.breathingSteps(2)
+                                    )
+                                    status =
+                                        "Breathe in 4, hold 7, out 8."
+                                }
+                            }
+                        )
+                    }
+
                     "COMPOSER" -> {
                         ComposerPage(
                             context = context,
@@ -612,6 +949,12 @@ private fun OneGlyphApp() {
                                 chargeTarget,
                             cameraSeconds =
                                 cameraSeconds,
+                            linkDetail =
+                                linkDetailText,
+                            notifFlash =
+                                notifFlashOn,
+                            lowBattery =
+                                lowBatteryOn,
                             onAppEnabled = {
                                 appEnabled = it
                                 store.setAppEnabled(it)
@@ -626,6 +969,7 @@ private fun OneGlyphApp() {
                                         context
                                     )
                                     toyOn = false
+                                    metroOn = false
                                     status =
                                         "OneGlyph is off."
                                 } else {
@@ -659,82 +1003,84 @@ private fun OneGlyphApp() {
                             onCameraSeconds = {
                                 cameraSeconds = it
                                 store.setCameraSeconds(it)
+                            },
+                            onNotifFlash = {
+                                notifFlashOn = it
+                                store.setNotificationFlashEnabled(it)
+                                status =
+                                    if (it) {
+                                        "Notification flash is on."
+                                    } else {
+                                        "Notification flash is off."
+                                    }
+                            },
+                            onLowBattery = {
+                                lowBatteryOn = it
+                                store.setLowBatteryAlertEnabled(it)
                             }
                         )
                     }
                 }
 
-                UserCard {
-                    Text(
-                        "DOT TOY",
-                        fontFamily = NDotFamily,
-                        fontSize = 10.sp,
-                        color =
-                            colors.onSurface.copy(
-                                alpha = .55f
+                            ToySection(
+                                toyOn = toyOn,
+                                status = status,
+                                enabled = appEnabled,
+                                connected = connected,
+                                onStartToy = {
+                                    store.setBackgroundMode(
+                                        "toy"
+                                    )
+                                    beatSyncOn = false
+                                    metroOn = false
+                                    toyOn = true
+                                    requestBackgroundRecoveryAccess(
+                                        context
+                                    )
+                                    GlyphBackgroundService.startToy(
+                                        context
+                                    )
+                                    status =
+                                        "Dot toy is on."
+                                },
+                                onStopToy = {
+                                    store.setBackgroundMode(
+                                        "none"
+                                    )
+                                    toyOn = false
+                                    GlyphBackgroundService.stopToy(
+                                        context
+                                    )
+                                    GlyphBackgroundService.stopPattern(
+                                        context
+                                    )
+                                    status =
+                                        "Dot toy off."
+                                }
                             )
-                    )
-
-                    Text(
-                        if (toyOn) {
-                            "Flash mode is running."
-                        } else {
-                            "Make the dot go a little crazy."
-                        },
-                        fontFamily = NDotFamily,
-                        fontSize = 16.sp,
-                        color = colors.onSurface
-                    )
-
-                    PrimaryButton(
-                        text =
-                            if (toyOn) {
-                                "TURN OFF TOY"
-                            } else {
-                                "TURN ON TOY"
-                            },
-                        enabled =
-                            appEnabled &&
-                                connected,
-                        onClick = {
-                            if (toyOn) {
-                                store.setBackgroundMode(
-                                    "none"
-                                )
-                                toyOn = false
-                                GlyphBackgroundService.stopToy(
-                                    context
-                                )
-                                GlyphBackgroundService.stopPattern(context)
-                                status =
-                                    "Dot toy off."
-                            } else {
-                                store.setBackgroundMode(
-                                    "toy"
-                                )
-                                beatSyncOn = false
-                                toyOn = true
-                                requestBackgroundRecoveryAccess(
-                                    context
-                                )
-                                GlyphBackgroundService.startToy(
-                                    context
-                                )
-                                status =
-                                    "Dot toy is on."
-                            }
                         }
-                    )
+                    }
                 }
 
-                Text(
-                    status,
-                    fontFamily = NDotFamily,
-                    fontSize = 10.sp,
-                    color =
-                        colors.onBackground.copy(
-                            alpha = 0.55f
-                        )
+                BottomPillNav(
+                    modifier =
+                        Modifier.align(
+                            Alignment.BottomCenter
+                        ),
+                    pagerState = pagerState,
+                    backdrop = contentBackdrop,
+                    onPage = { target ->
+                        navScope.launch {
+                            // Bouncy spring: the indicator overshoots
+                            // and settles instead of gliding linearly.
+                            pagerState.animateScrollToPage(
+                                target,
+                                animationSpec = spring(
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            )
+                        }
+                    }
                 )
             }
         }
@@ -931,77 +1277,132 @@ private fun Header(
 }
 
 @Composable
-private fun TopNavigation(
-    page: String,
-    onPage: (String) -> Unit
+private fun BottomPillNav(
+    modifier: Modifier = Modifier,
+    pagerState: PagerState,
+    backdrop: Backdrop,
+    onPage: (Int) -> Unit
+) {
+    val items =
+        listOf("Home", "Play", "Composer", "Settings")
+
+    var entered by remember {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(Unit) {
+        entered = true
+    }
+
+    AnimatedVisibility(
+        visible = entered,
+        enter =
+            fadeIn() +
+                slideInVertically(
+                    initialOffsetY = { it }
+                ),
+        modifier = modifier
+    ) {
+        FloatingBottomBar(
+            modifier =
+                Modifier.padding(
+                    bottom = 8.dp
+                ),
+            selectedIndex =
+                pagerState.currentPage,
+            onSelected = onPage,
+            tabsCount = items.size,
+            backdrop = backdrop,
+            isBlurEnabled = true
+        ) { activateTab ->
+            items.forEachIndexed { index, label ->
+                FloatingBottomBarItem(
+                    selected =
+                        index == pagerState.currentPage,
+                    onClick = {
+                        activateTab(index)
+                    },
+                    modifier =
+                        Modifier.defaultMinSize(
+                            minWidth = 76.dp
+                        )
+                ) {
+                    Text(
+                        label,
+                        fontFamily = NDotFamily,
+                        fontSize = 10.sp,
+                        color =
+                            LocalContentColor.current
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToySection(
+    toyOn: Boolean,
+    status: String,
+    enabled: Boolean,
+    connected: Boolean,
+    onStartToy: () -> Unit,
+    onStopToy: () -> Unit
 ) {
     val colors =
         MaterialTheme.colorScheme
 
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .border(
-                    1.dp,
-                    colors.outline,
-                    RoundedCornerShape(6.dp)
+    UserCard {
+        Text(
+            "DOT TOY",
+            fontFamily = NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
                 )
-                .padding(4.dp),
-        horizontalArrangement =
-            Arrangement.spacedBy(4.dp)
-    ) {
-        listOf(
-            "HOME" to "Home",
-            "COMPOSER" to "Composer",
-            "SETTINGS" to "Settings"
-        ).forEach { item ->
-            Box(
-                modifier =
-                    Modifier
-                        .weight(1f)
-                        .background(
-                            if (
-                                page ==
-                                    item.first
-                            ) {
-                                colors.primary
-                            } else {
-                                Color.Transparent
-                            },
-                            RoundedCornerShape(4.dp)
-                        )
-                        .clickable {
-                            onPage(
-                                item.first
-                            )
-                        }
-                        .padding(
-                            vertical = 10.dp
-                        ),
-                contentAlignment =
-                    Alignment.Center
-            ) {
-                Text(
-                    item.second,
-                    fontFamily =
-                        NDotFamily,
-                    fontSize = 10.sp,
-                    color =
-                        if (
-                            page ==
-                                item.first
-                        ) {
-                            colors.onPrimary
-                        } else {
-                            colors.onBackground.copy(
-                                alpha = .6f
-                            )
-                        }
-                )
+        )
+
+        Text(
+            if (toyOn) {
+                "Flash mode is running."
+            } else {
+                "Make the dot go a little crazy."
+            },
+            fontFamily = NDotFamily,
+            fontSize = 16.sp,
+            color = colors.onSurface
+        )
+
+        PrimaryButton(
+            text =
+                if (toyOn) {
+                    "TURN OFF TOY"
+                } else {
+                    "TURN ON TOY"
+                },
+            enabled =
+                enabled &&
+                    connected,
+            onClick = {
+                if (toyOn) {
+                    onStopToy()
+                } else {
+                    onStartToy()
+                }
             }
-        }
+        )
     }
+
+    Text(
+        status,
+        fontFamily = NDotFamily,
+        fontSize = 10.sp,
+        color =
+            colors.onBackground.copy(
+                alpha = 0.55f
+            )
+    )
 }
 
 @Composable
@@ -1015,9 +1416,11 @@ private fun HomePage(
     playback: MediaPlaybackInfo?,
     brightness: Int,
     cameraSeconds: Int,
+    beatEngine: String,
     onBrightness: (Int) -> Unit,
     onBeatSync: () -> Unit,
     onMediaAccess: () -> Unit,
+    onBeatTest: () -> Unit,
     onBlink: (List<GlyphStep>) -> Unit,
     onStop: () -> Unit,
     onCamera: () -> Unit
@@ -1125,6 +1528,26 @@ private fun HomePage(
                     onMediaAccess
             )
         }
+
+        if (beatSyncOn) {
+            Text(
+                beatEngine,
+                fontFamily = NDotFamily,
+                fontSize = 9.sp,
+                color =
+                    colors.onSurface.copy(
+                        alpha = .55f
+                    )
+            )
+        }
+
+        OutlinedAction(
+            "TEST BEAT",
+            enabled &&
+                connected,
+            onClick =
+                onBeatTest
+        )
 
         SmallNote(
             when {
@@ -1297,6 +1720,262 @@ private fun HomePage(
                     )
                 )
             }
+        )
+    }
+}
+
+@Composable
+private fun PlayPage(
+    context: Context,
+    enabled: Boolean,
+    connected: Boolean,
+    metroOn: Boolean,
+    bpm: Int,
+    morseText: String,
+    diceResult: Int,
+    onBpm: (Int) -> Unit,
+    onMorseText: (String) -> Unit,
+    onMetronome: () -> Unit,
+    onMorse: () -> Unit,
+    onStop: () -> Unit,
+    onClock: () -> Unit,
+    onBattery: () -> Unit,
+    onDice: () -> Unit,
+    onBreathe: () -> Unit
+) {
+    val colors =
+        MaterialTheme.colorScheme
+
+    val ready =
+        enabled && connected
+
+    UserCard {
+        Text(
+            "MORSE CODER",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Type it, dot flashes it.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 22.sp,
+            color =
+                colors.onSurface
+        )
+
+        OutlinedTextField(
+            value = morseText,
+            onValueChange = {
+                onMorseText(it.take(40))
+            },
+            modifier =
+                Modifier.fillMaxWidth(),
+            enabled = enabled,
+            singleLine = true
+        )
+
+        Row(
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    8.dp
+                )
+        ) {
+            PrimaryButton(
+                text = "PLAY MORSE",
+                modifier =
+                    Modifier.weight(1f),
+                enabled =
+                    ready &&
+                        morseText.isNotBlank(),
+                onClick =
+                    onMorse
+            )
+
+            PrimaryButton(
+                text = "STOP",
+                modifier =
+                    Modifier.weight(1f),
+                enabled = ready,
+                onClick =
+                    onStop
+            )
+        }
+    }
+
+    UserCard {
+        Text(
+            "METRONOME",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "$bpm BPM",
+            fontFamily =
+                NDotFamily,
+            fontSize = 32.sp,
+            color =
+                colors.onSurface
+        )
+
+        Slider(
+            value =
+                bpm.toFloat(),
+            onValueChange = {
+                onBpm(it.toInt())
+            },
+            valueRange =
+                30f..240f,
+            enabled =
+                enabled
+        )
+
+        PrimaryButton(
+            text =
+                if (metroOn) {
+                    "STOP METRONOME"
+                } else {
+                    "START METRONOME"
+                },
+            enabled = ready,
+            onClick =
+                onMetronome
+        )
+
+        SmallNote(
+            "Bright flash on every 4th beat. Keeps running in the background."
+        )
+    }
+
+    UserCard {
+        Text(
+            "TALKING CLOCK",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "The dot tells the time in flashes.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 15.sp,
+            color =
+                colors.onSurface
+        )
+
+        PrimaryButton(
+            text = "FLASH THE TIME",
+            enabled = ready,
+            onClick =
+                onClock
+        )
+    }
+
+    UserCard {
+        Text(
+            "BATTERY METER",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Flashes tens, then ones.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 15.sp,
+            color =
+                colors.onSurface
+        )
+
+        PrimaryButton(
+            text = "FLASH BATTERY LEVEL",
+            enabled = ready,
+            onClick =
+                onBattery
+        )
+    }
+
+    UserCard {
+        Text(
+            "DOT DICE",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            if (diceResult in 1..6) {
+                diceResult.toString()
+            } else {
+                "—"
+            },
+            fontFamily =
+                NDotFamily,
+            fontSize = 32.sp,
+            color =
+                colors.onSurface
+        )
+
+        PrimaryButton(
+            text = "ROLL THE DOT",
+            enabled = ready,
+            onClick =
+                onDice
+        )
+    }
+
+    UserCard {
+        Text(
+            "BREATHE 4-7-8",
+            fontFamily =
+                NDotFamily,
+            fontSize = 10.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            "Dot swells as you inhale, sinks as you exhale.",
+            fontFamily =
+                NDotFamily,
+            fontSize = 15.sp,
+            color =
+                colors.onSurface
+        )
+
+        PrimaryButton(
+            text = "START BREATHING",
+            enabled = ready,
+            onClick =
+                onBreathe
         )
     }
 }
@@ -1564,11 +2243,16 @@ private fun SettingsPage(
     chargingEnabled: Boolean,
     chargeTarget: Int,
     cameraSeconds: Int,
+    linkDetail: String,
+    notifFlash: Boolean,
+    lowBattery: Boolean,
     onAppEnabled: (Boolean) -> Unit,
     onDarkMode: (Boolean) -> Unit,
     onChargingEnabled: (Boolean) -> Unit,
     onChargeTarget: (Int) -> Unit,
-    onCameraSeconds: (Int) -> Unit
+    onCameraSeconds: (Int) -> Unit,
+    onNotifFlash: (Boolean) -> Unit,
+    onLowBattery: (Boolean) -> Unit
 ) {
     val colors =
         MaterialTheme.colorScheme
@@ -1643,6 +2327,21 @@ private fun SettingsPage(
                         chargingEnabled,
                     onCheckedChange =
                         onChargingEnabled
+                )
+            }
+        )
+
+        SettingRow(
+            title =
+                "Low battery alert",
+            description =
+                "Flash SOS when the battery runs low.",
+            control = {
+                Switch(
+                    checked =
+                        lowBattery,
+                    onCheckedChange =
+                        onLowBattery
                 )
             }
         )
@@ -1740,6 +2439,35 @@ private fun SettingsPage(
 
     UserCard {
         Text(
+            "GLYPH SERVICE",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Text(
+            linkDetail,
+            fontFamily =
+                NDotFamily,
+            fontSize = 9.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        SmallNote(
+            "Stock Nothing OS Glyph service. " +
+                "If this shows MISSING, install on a supported Nothing Phone."
+        )
+    }
+
+    UserCard {
+        Text(
             "MEDIA ACCESS",
             fontFamily =
                 NDotFamily,
@@ -1767,6 +2495,22 @@ private fun SettingsPage(
                 )
             }
         )
+
+        SettingRow(
+            title =
+                "Notification flash",
+            description =
+                "Blink twice for new notifications. " +
+                    "Paused while Toy, Music Sync or Metronome runs.",
+            control = {
+                Switch(
+                    checked =
+                        notifFlash,
+                    onCheckedChange =
+                        onNotifFlash
+                )
+            }
+        )
     }
 
     UserCard {
@@ -1785,17 +2529,20 @@ private fun SettingsPage(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Bundled drawable: loads offline. Cropped to a true
+            // circle so no square corners escape the border.
             androidx.compose.foundation.Image(
                 painter = painterResource(R.drawable.leon_profile),
                 contentDescription = "Leon Sony",
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(56.dp)
+                    .clip(CircleShape)
                     .border(
                         1.dp,
                         colors.outline,
                         CircleShape
                     )
-                    .padding(2.dp)
             )
 
             Column(
@@ -1833,6 +2580,74 @@ private fun SettingsPage(
                     )
                 )
             }
+        )
+    }
+
+    UserCard {
+        Text(
+            "SPECIAL THANKS",
+            fontFamily =
+                NDotFamily,
+            fontSize = 11.sp,
+            color =
+                colors.onSurface.copy(
+                    alpha = .55f
+                )
+        )
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                "saran_archiz",
+                fontFamily = NDotFamily,
+                fontSize = 20.sp,
+                color = colors.onSurface
+            )
+
+            Text(
+                "Nothing Community",
+                fontFamily = NDotFamily,
+                fontSize = 9.sp,
+                color = colors.onSurface.copy(alpha = .55f)
+            )
+
+            SmallNote(
+                "For the general idea that sparked OneGlyph."
+            )
+        }
+
+        HorizontalDivider(
+            color =
+                colors.outline.copy(
+                    alpha = .6f
+                )
+        )
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                "creet_seneseca",
+                fontFamily = NDotFamily,
+                fontSize = 20.sp,
+                color = colors.onSurface
+            )
+
+            Text(
+                "Reddit",
+                fontFamily = NDotFamily,
+                fontSize = 9.sp,
+                color = colors.onSurface.copy(alpha = .55f)
+            )
+
+            SmallNote(
+                "For general testing and bug reports."
+            )
+        }
+
+        SmallNote(
+            "I thank you sincerely for your contributions ;)"
         )
     }
 }

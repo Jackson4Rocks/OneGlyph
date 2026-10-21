@@ -7,6 +7,9 @@
     <uses-permission
         android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Required together with RECORD_AUDIO for output-mix Visualizer
+        capture (Beat Sync) on Nothing firmware. Normal permission:
+        auto-granted, no prompt. -->
     <uses-permission
         android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
@@ -90,6 +93,8 @@
                     android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
                 <action
                     android:name="android.intent.action.BOOT_COMPLETED" />
+                <action
+                    android:name="android.intent.action.BATTERY_LOW" />
             </intent-filter>
         </receiver>
 

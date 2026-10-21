@@ -1,5 +1,3 @@
-import java.net.URI
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -7,25 +5,32 @@ plugins {
 
 android {
     namespace = "com.jackson4rocks.oneglyph"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.jackson4rocks.oneglyph"
         minSdk = 35
         targetSdk = 36
-        versionCode = 101
-        versionName = "1.1"
+        versionCode = 200
+        versionName = "2.0"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Smaller APK / DEX for a stock-only app.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true
+        // Unused (no BuildConfig reference in sources): skip generation.
+        buildConfig = false
     }
 
     packaging {
@@ -36,7 +41,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2025.08.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
@@ -45,39 +50,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // Liquid-glass bar: real backdrop blur, lens refraction, drag physics.
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4-rc01")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
-}
-
-
-val bundleLeonProfile = tasks.register("bundleLeonProfile") {
-    val output =
-        file(
-            "src/main/res/drawable/leon_profile.png"
-        )
-
-    outputs.file(output)
-
-    onlyIf {
-        !output.exists()
-    }
-
-    doLast {
-        output.parentFile.mkdirs()
-
-        URI(
-            "https://github.com/Jackson4Rocks.png?size=256"
-        )
-            .toURL()
-            .openStream()
-            .use { input ->
-                output.outputStream().use { outputStream ->
-                    input.copyTo(outputStream)
-                }
-            }
-    }
-}
-
-tasks.named("preBuild").configure {
-    dependsOn(bundleLeonProfile)
 }
