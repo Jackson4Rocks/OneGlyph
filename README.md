@@ -3,7 +3,7 @@
 
   # OneGlyph
 
-  **Make the one dot do more. :)**
+  **Make the one dot do more. >_<**
 
   Your Nothing Phone (3a) Lite has a tiny little Glyph dot sitting there doing nothing most of the day.
   OneGlyph puts it to work — music, messages, timers, toys and all sorts of fun stuff.
@@ -13,7 +13,7 @@
 
 ---
 
-## Hello! What is this? ;)
+## Hello! What is this?
 
 OneGlyph is a small, friendly app that controls the single Glyph dot on your phone. No complicated dashboards,
 no 40-toggle settings maze — just open it, tap something, and watch the dot dance.
@@ -45,7 +45,7 @@ Beat Sync needs two permissions before it can hear your music:
 1. Tap **TURN ON BEAT SYNC**.
 2. Allow **Audio access** when asked (so it can analyse the sound).
 3. Allow **Media Access** on the next screen (so it knows what's playing).
-4. Play something! The music card will say **"The dot is dancing."** :)
+4. Play something! The music card will say **"The dot is dancing."**
 
 > Tip: while Beat Sync is on you'll see a live engine line like
 > `ENGINE • LISTENING • last beat 0.4s ago`. That's the app proving it's really hearing beats.
@@ -68,12 +68,12 @@ OneGlyph has four tabs, reachable by tapping the pill at the bottom — or just 
 
 This is where the dot shows off:
 
-- **Morse Coder** — type up to 40 characters, the dot flashes them in real Morse code. Great for secret messages ;)
+- **Morse Coder** — type up to 40 characters, the dot flashes them in real Morse code. Great for secret messages. 
 - **Metronome** — 30 to 240 BPM with a bright accent every 4th beat. Keeps running in the background while you practise!
 - **Talking Clock** — one tap and the dot flashes the time: hours… pause… minute tens… pause… minute ones. A zero reads as one long glow.
 - **Battery Meter** — flashes your exact battery level (tens, then ones).
 - **Dot Dice** — rolls a d6 with a slowing suspense flicker, then flashes your number.
-- **Breathe 4-7-8** — a guided breathing cycle: the dot swells as you inhale (4s), holds dim (7s) and sinks as you exhale (8s). Relaxing, we promise :)
+- **Breathe 4-7-8** — a guided breathing cycle: the dot swells as you inhale (4s), holds dim (7s) and sinks as you exhale (8s). Relaxing, we promise
 
 ### 🧩 Composer — your own patterns
 
@@ -86,24 +86,24 @@ Build blinking sequences up to **8 steps**, each with its own brightness and dur
 | OneGlyph | Master on/off switch for everything |
 | Appearance | Dark or light mode |
 | Charging effects | 4 blinks when charging starts, 9 blinks at your target |
-| Charge target | 80%, 90% or 100% — match it to your phone's charging limit :) |
+| Charge target | 80%, 90% or 100% — match it to your phone's charging limit |
 | Low battery alert | Flashes SOS when the battery runs low |
 | Camera timer | 3s, 5s or 10s countdown |
 | Glyph service | Live status of the connection to your phone's Glyph service |
 | Media Access | Shortcut to Android's media-access settings |
 | Notification flash | Double-blink for new notifications (pauses while Toy, Music Sync or Metronome runs) |
-| Project Maintainer | That's Leon! Say hi ;) |
+| Project Maintainer | That's me! Say hi! |
 | Special Thanks | Lovely people who helped shape OneGlyph |
 
-## Persistent modes — they keep going without you :)
+## Persistent modes — they keep going without you
 
 **Dot Toy**, **Music Sync** and **Metronome** keep running in the background even if you close the app, thanks to a little foreground service (that's the calm "Keep Blinking!" notification).
 
-- Only **one** of them runs at a time — starting one politely stops the others ;)
+- Only **one** of them runs at a time — starting one politely stops the others
 - If Android naps the service, it wakes itself back up automatically.
 - Turning the master **OneGlyph** switch off stops everything.
 
-## Troubleshooting — don't panic :)
+## Troubleshooting — don't panic •-•
 
 **The top dot says LINKING forever**
 - Make sure you're on stock Nothing OS on a supported phone. OneGlyph talks to Nothing's Glyph service, which only exists there.
