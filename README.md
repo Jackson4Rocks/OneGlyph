@@ -141,7 +141,7 @@ app/src/main/java/com/jackson4rocks/oneglyph/
 └── MainActivity.kt            # Compose UI (Home / Play / Composer / Settings)
 ```
 
-## Credits — the lovely humans :)
+## Credits — to the people that supported me
 
 **Project Maintainer — Leon Sony ([Jackson4Rocks](https://github.com/Jackson4Rocks))**
 An independent community project, made with care :)
