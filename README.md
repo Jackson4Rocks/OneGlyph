@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/oneglyph.svg" width="128" alt="OneGlyph icon" />
+  <img src="assets/oneglyph.svg" width="128" alt="OneGlyph icon"/>
 
   # OneGlyph
 
